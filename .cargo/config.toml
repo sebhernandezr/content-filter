@@ -1,0 +1,9 @@
+# macOS 12.0 is the product floor. Every API this project uses shipped in 10.15.4 or earlier
+# (NEFilterDataProvider 10.15, sourceAppAuditToken 10.15.4, OSSystemExtensionRequest 10.15), so
+# 12.0 costs nothing — it is stated here so it is a deliberate contract rather than whatever the
+# installed SDK happens to default to.
+#
+# This must agree with `minimumSystemVersion` in app/src-tauri/tauri.conf.json and with
+# LSMinimumSystemVersion in macos/sysext/Info.plist.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "12.0"

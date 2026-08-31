@@ -1,0 +1,14 @@
+[package]
+name = "filter-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wire types shared by the content-filter system extension and the container app"
+
+# Deliberately dependency-light: no objc2, no tauri. This crate is compiled into BOTH the
+# privileged system-extension binary and the Tauri plugin, so it must stay portable and cheap.
+# It is the single definition of the flow-log format the two sides agree on.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

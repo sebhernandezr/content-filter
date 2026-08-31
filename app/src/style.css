@@ -1,0 +1,98 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f7;
+  --panel: #ffffff;
+  --text: #1b1b1f;
+  --muted: #6b6b76;
+  --line: #e2e2e6;
+  --accent: #2563eb;
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #b91c1c;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --panel: #1f1f23;
+    --text: #ececf1;
+    --muted: #9a9aa5;
+    --line: #2e2e35;
+    --accent: #60a5fa;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+header h1 { margin: 0 0 4px; font-size: 20px; }
+.subtitle { margin: 0 0 20px; color: var(--muted); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+h2 { margin: 0 0 12px; font-size: 14px; }
+
+.controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+
+button {
+  font: inherit;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--text); border-color: var(--line); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.status {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+.status dt { color: var(--muted); }
+.status dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.state-active { color: var(--ok); font-weight: 600; }
+.state-warn { color: var(--warn); font-weight: 600; }
+.state-error { color: var(--err); font-weight: 600; }
+
+.message {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  white-space: pre-wrap;
+}
+.message.error { border-color: var(--err); color: var(--err); }
+
+.hint { color: var(--muted); margin: 0; }
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+th { color: var(--muted); font-weight: 500; }
+td.dest { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+td.pending { color: var(--muted); font-style: italic; }

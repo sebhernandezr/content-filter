@@ -1,0 +1,16 @@
+[package]
+name = "digiexam-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Digiexam content filter — container app"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-content-filter = { path = "../../crates/tauri-plugin-content-filter" }
+serde = { workspace = true }
+serde_json = { workspace = true }

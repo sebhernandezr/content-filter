@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the SYSTEM EXTENSION (com.digiexam.macos.NetworkExtensions.ContentFilter).
+
+  NOTE ON STYLE: no doubled hyphens appear in these comments. XML forbids them inside a comment
+  and codesign's entitlements parser rejects the whole file when it finds one, with the unhelpful
+  message "Failed to parse entitlements: AMFIUnserializeXML: syntax error". `plutil -lint` does
+  not catch this. Command-line flags are therefore named in prose.
+
+  Applied by scripts/assemble-sysext.sh when signing the .systemextension bundle, which happens
+  BEFORE that bundle is copied into the app: the inner bundle must already carry its own
+  signature when the outer app is signed, because the outer pass signs shallowly (no deep flag)
+  and seals this bundle into the app's CodeResources.
+
+  Every key must also appear in the "Spark macOS ContentFilter" provisioning profile embedded at
+  Contents/embedded.provisionprofile inside this bundle.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Note the ContentFilter suffix: this must match THIS bundle's own profile, not the app's.
+      Swapping the two application-identifier values between the bundles is a silent AMFI
+      failure; everything signs and notarizes, and the extension simply never launches.
+    -->
+    <key>com.apple.application-identifier</key>
+    <string>73T9H7VE4P.com.digiexam.macos.NetworkExtensions.ContentFilter</string>
+
+    <key>com.apple.developer.team-identifier</key>
+    <string>73T9H7VE4P</string>
+
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>content-filter-provider-systemextension</string>
+    </array>
+
+    <!-- Must match app.entitlements exactly, or it is two different containers. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.digiexam.macos.NetworkExtensions</string>
+    </array>
+
+    <!--
+      DELIBERATELY ABSENT, and both absences are decisions:
+
+      com.apple.developer.system-extension.install
+          The right to install an extension belongs to the container app, not to the extension.
+
+      com.apple.security.app-sandbox
+          Sandboxing a SYSTEM extension is optional, unlike an app extension where it is
+          mandatory. It is off for this observe-only MVP to remove two variables from a ticket
+          whose whole purpose is proving that flows arrive: filesystem access for a durable log
+          fallback, and process inspection for optional source-app attribution. Add it back in
+          the enforcement follow-up once the pipeline is trusted. It is one key, but it needs its
+          own re-validation pass.
+    -->
+</dict>
+</plist>

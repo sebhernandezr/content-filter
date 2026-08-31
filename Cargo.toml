@@ -1,0 +1,24 @@
+# The system-extension binary (`crates/filter-sysext`) is deliberately NOT a member of this
+# workspace. It declares its own `[workspace]` so it never inherits Tauri's dependency graph:
+# that binary runs as root inside a privileged NetworkExtension process, and everything linked
+# into it is attack surface. Keep it minimal and keep it separate.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/filter-types",
+    "crates/tauri-plugin-content-filter",
+    "app/src-tauri",
+]
+exclude = ["crates/filter-sysext"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+filter-types = { path = "crates/filter-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

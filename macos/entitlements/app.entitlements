@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the CONTAINER APP (com.digiexam.macos.NetworkExtensions).
+
+  NOTE ON STYLE: no doubled hyphens appear in these comments, because XML forbids them inside a
+  comment and codesign's entitlements parser (AMFIUnserializeXML) rejects the file outright when
+  it finds one. `plutil -lint` is more lenient and will NOT catch it. So command-line flags are
+  named in prose here rather than written literally.
+
+  This file is never copied into the .app. Entitlements reach a bundle only by being baked into
+  its code signature: scripts/build-app.sh passes this path to codesign via its "entitlements"
+  flag, together with "force", "options runtime" and "timestamp".
+
+  Xcode generates that flag from the CODE_SIGN_ENTITLEMENTS build setting; without Xcode we pass
+  it ourselves. Read back what actually landed in a signed bundle with:
+
+      codesign -d [entitlements flag] - [xml flag] dist/Digiexam.app | plutil -p -
+
+  Every key below must also appear in the "Spark macOS App" provisioning profile embedded at
+  Contents/embedded.provisionprofile. At launch AMFI requires the signature's entitlements to be
+  a subset of the profile's; a key here that the profile lacks means the app signs and notarizes
+  cleanly and then refuses to spawn, reporting AMFI error 163.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      LOAD-BEARING AND EASY TO LOSE. xcodebuild injects application-identifier automatically;
+      codesign does NOT. Without it nesessionmanager refuses this process's control channel to
+      the NE plugin, and it fails in a way that looks like success: saveToPreferences returns OK,
+      the filter appears in System Settings, and nothing ever happens.
+    -->
+    <key>com.apple.application-identifier</key>
+    <string>73T9H7VE4P.com.digiexam.macos.NetworkExtensions</string>
+
+    <key>com.apple.developer.team-identifier</key>
+    <string>73T9H7VE4P</string>
+
+    <!--
+      The "systemextension" suffix is required. The plain `content-filter-provider` form is for
+      APP extensions; our approved profiles contain only the systemextension variants. The app
+      needs this to drive NEFilterManager and the extension needs it to BE a filter provider, so
+      both bundles carry it.
+    -->
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>content-filter-provider-systemextension</string>
+    </array>
+
+    <!--
+      Permits OSSystemExtensionRequest. This is the right to INSTALL an extension, so it belongs
+      to the installer (this app) and must NOT appear in sysext.entitlements.
+    -->
+    <key>com.apple.developer.system-extension.install</key>
+    <true/>
+
+    <!--
+      Must match sysext.entitlements exactly. Unused by the observe-only MVP (flow records travel
+      over the unified log; see crates/tauri-plugin-content-filter/src/flow_log.rs), but kept
+      because the profile authorises it and adding it later means re-signing both bundles.
+    -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.digiexam.macos.NetworkExtensions</string>
+    </array>
+</dict>
+</plist>

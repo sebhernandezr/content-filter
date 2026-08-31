@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Merged into the Info.plist Tauri generates for the .app. Keys Tauri does not know about go here.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Shown in the system prompt when the app asks the user to approve the extension. Required:
+      without it the approval dialog gives the user no reason to say yes.
+    -->
+    <key>NSSystemExtensionUsageDescription</key>
+    <string>Digiexam uses a network content filter to restrict internet access during exams.</string>
+
+    <!-- Must agree with MACOSX_DEPLOYMENT_TARGET and the sysext's LSMinimumSystemVersion. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+</dict>
+</plist>

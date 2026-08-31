@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Info.plist for the .systemextension bundle.
+
+  TEMPLATE. Xcode-style $(PRODUCT_BUNDLE_IDENTIFIER) / $(EXECUTABLE_NAME) substitution does NOT
+  happen here — there is no Xcode in this build. The doubled-at-sign placeholders below are
+  replaced by scripts/assemble-sysext.sh from macos/identity.sh, so the identifiers and versions
+  have exactly one definition. Any placeholder left un-substituted fails the build: that script
+  greps the generated plist for leftovers before signing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
+    <!--
+      sysextd requires the executable at Contents/MacOS/<CFBundleExecutable>, and for a system
+      extension that name must be the BUNDLE IDENTIFIER itself — not a product name. The bundle
+      directory must likewise be named <CFBundleIdentifier>.systemextension. Get either wrong and
+      the extension is rejected with no useful diagnostic.
+    -->
+    <key>CFBundleExecutable</key>
+    <string>@@SYSEXT_ID@@</string>
+    <key>CFBundleIdentifier</key>
+    <string>@@SYSEXT_ID@@</string>
+    <key>CFBundleName</key>
+    <string>@@SYSEXT_ID@@</string>
+    <key>CFBundleDisplayName</key>
+    <string>@@SYSEXT_DISPLAY_NAME@@</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <!-- SYSX marks this as a system extension. An app extension would be XPC!; a plain app APPL. -->
+    <key>CFBundlePackageType</key>
+    <string>SYSX</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>@@MARKETING_VERSION@@</string>
+
+    <!--
+      CFBundleVersion. Changing this between builds makes macOS stage the new extension as
+      `terminated_waiting_to_uninstall_on_reboot` instead of activating it. Bump deliberately,
+      in macos/identity.sh, never automatically. See the long note there.
+    -->
+    <key>CFBundleVersion</key>
+    <string>@@BUNDLE_VERSION@@</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <!--
+      sysextd checks the CATEGORY PROPERTY of this bundle for this key, not the container app's —
+      it is a separate check from the app's own copy of the same key. Missing here, activation
+      fails with "extension failed category property check" (OSSystemExtensionErrorCode 9,
+      validationFailed) even though codesign, notarization and the app's Info.plist are all fine.
+      Confirmed via `log show` against sysextd on 2026-08-31: the failing check resolves code
+      signing info for the STAGED .systemextension bundle specifically, immediately before this
+      property check runs.
+    -->
+    <key>NSSystemExtensionUsageDescription</key>
+    <string>@@SYSEXT_USAGE_DESCRIPTION@@</string>
+
+    <!--
+      How the NetworkExtension framework finds our provider. The key is the extension point;
+      the value is the ObjC class NAME as registered with the runtime.
+
+      That name is set by `#[name = "FilterProvider"]` in the define_class! invocation in
+      crates/filter-sysext/src/provider.rs. These two strings must match exactly. If they drift,
+      the extension launches, startSystemExtensionMode() finds no class for the extension point,
+      and handleNewFlow: is simply never called — which looks identical to "the filter is broken".
+    -->
+    <key>NetworkExtension</key>
+    <dict>
+        <key>NEProviderClasses</key>
+        <dict>
+            <key>com.apple.networkextension.filter-data</key>
+            <string>FilterProvider</string>
+        </dict>
+    </dict>
+</dict>
+</plist>

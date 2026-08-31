@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Digiexam Content Filter</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Content Filter</h1>
+      <p class="subtitle">
+        Observe-only build — every flow is logged and <strong>allowed</strong>. No traffic is blocked.
+      </p>
+    </header>
+
+    <section class="panel">
+      <div class="controls">
+        <button id="enable" type="button">Enable filter</button>
+        <button id="disable" type="button" class="secondary">Disable</button>
+        <button id="remove" type="button" class="secondary">Remove</button>
+      </div>
+
+      <dl class="status">
+        <dt>Extension</dt>
+        <dd id="activation">—</dd>
+        <dt>Configuration</dt>
+        <dd id="enabled">—</dd>
+        <dt>Flows seen</dt>
+        <dd id="count">0</dd>
+      </dl>
+
+      <p id="message" class="message" hidden></p>
+    </section>
+
+    <section class="panel">
+      <h2>Recent flows</h2>
+      <p id="empty" class="hint">
+        Nothing yet. Enable the filter, then browse — flows appear here within a second.
+      </p>
+      <table id="flows" hidden>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Destination</th>
+            <th>Port</th>
+            <th>Proto</th>
+            <th>Family</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

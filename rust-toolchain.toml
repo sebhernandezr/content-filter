@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.97"
+# Both slices of the universal binary. `universal-apple-darwin` is not a rustup target —
+# it is a `lipo` of these two (see scripts/assemble-sysext.sh).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+components = ["rustfmt", "clippy"]

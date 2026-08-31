@@ -1,0 +1,15 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+Allows the frontend to activate the content-filter system extension, enable and disable the
+filter, and read observed network flows.
+"""
+permissions = [
+    "allow-activate-extension",
+    "allow-enable-filter",
+    "allow-disable-filter",
+    "allow-remove-filter",
+    "allow-filter-status",
+    "allow-recent-flows",
+]
