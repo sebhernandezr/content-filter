@@ -3,7 +3,7 @@
 [default]
 description = """
 Allows the frontend to activate the content-filter system extension, enable and disable the
-filter, and read observed network flows.
+filter, and read its status.
 """
 permissions = [
     "allow-activate-extension",
@@ -11,5 +11,4 @@ permissions = [
     "allow-disable-filter",
     "allow-remove-filter",
     "allow-filter-status",
-    "allow-recent-flows",
 ]

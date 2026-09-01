@@ -13,20 +13,21 @@
 //! Step 2 succeeding while step 1 has not really finished is the failure this project was built
 //! to make impossible to miss: the configuration appears in System Settings → Network, the app
 //! reports "enabled", and no provider process exists to receive a single flow.
+//!
+//! Flow records themselves are not part of this plugin: watch them in a terminal with
+//! `make logs-flows`, not in the app window.
 
 #[cfg(target_os = "macos")]
 mod commands;
 #[cfg(target_os = "macos")]
 mod filter_manager;
 #[cfg(target_os = "macos")]
-mod flow_log;
-#[cfg(target_os = "macos")]
 mod sysext;
 
 #[cfg(not(target_os = "macos"))]
 mod unsupported;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use tauri::{
     plugin::{Builder, TauriPlugin},
@@ -36,26 +37,8 @@ use tauri::{
 /// Plugin-wide state, reachable from commands via `app.state::<FilterState>()`.
 #[derive(Default)]
 pub struct FilterState {
-    /// Buffered flow records, filled by the `log stream` tail.
-    #[cfg(target_os = "macos")]
-    pub flows: Arc<Mutex<flow_log::FlowBuffer>>,
-    /// The running tail. Held so it is not dropped (which would kill the child process).
-    #[cfg(target_os = "macos")]
-    pub tail: Mutex<Option<flow_log::FlowTail>>,
     /// Last activation outcome, so the UI can show it without re-submitting a request.
     pub activation: Mutex<filter_types::ActivationState>,
-}
-
-impl FilterState {
-    fn new() -> Self {
-        Self {
-            #[cfg(target_os = "macos")]
-            flows: Arc::new(Mutex::new(flow_log::FlowBuffer::default())),
-            #[cfg(target_os = "macos")]
-            tail: Mutex::new(None),
-            activation: Mutex::new(filter_types::ActivationState::Idle),
-        }
-    }
 }
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
@@ -66,24 +49,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::disable_filter,
             commands::remove_filter,
             commands::filter_status,
-            commands::recent_flows,
         ])
         .setup(|app, _api| {
-            app.manage(FilterState::new());
-
-            // Start tailing immediately, not on first enable. Records emitted between the
-            // provider starting and the user opening the flow view would otherwise be lost, and
-            // an empty view would be ambiguous between "no flows" and "not listening yet".
-            #[cfg(target_os = "macos")]
-            {
-                let state = app.state::<FilterState>();
-                match flow_log::start(state.flows.clone()) {
-                    Ok(tail) => *state.tail.lock().unwrap() = Some(tail),
-                    // Non-fatal: the filter still works, only the in-app flow view is blind.
-                    // Console.app remains available, which is the point of using os_log.
-                    Err(e) => eprintln!("[content-filter] flow log tail unavailable: {e}"),
-                }
-            }
+            app.manage(FilterState::default());
             Ok(())
         })
         .build()

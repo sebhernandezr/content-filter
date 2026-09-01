@@ -2,8 +2,10 @@
 
 Manual, on a real Mac. The MVP is proven when every box is ticked.
 
-The goal is narrow: **flows reach `handleNewFlow:` and are visible.** Nothing is blocked —
-the verdict is a hard-coded allow.
+The goal is narrow: **flows reach `handleNewFlow:` and are visible in a terminal.** Nothing is
+blocked with the shipped `rules.json` — its `default_action` is `allow` — but the verdict now
+comes from `rules::decide()` (`crates/filter-sysext/src/rules.rs`), not a hard-coded constant, so
+this checklist also proves that seam is wired (see the rules step under Flows below).
 
 ---
 
@@ -36,6 +38,7 @@ loaded, which is how the original problem went undiagnosed.
 | 3 | Universal slices | build output line `app arch: … sysext arch: …` | both show `x86_64 arm64` |
 | 4 | App signature | `codesign --verify --deep --strict --verbose=2 dist/Digiexam.app` | valid on disk; satisfies its Designated Requirement |
 | 5 | Install location | `make install` | app launches from `/Applications` |
+| 5a | Rules installed | `ls -l "/Library/Application Support/Digiexam/rules.json"` | exists, owned `root:wheel`, mode `644` (installed by `make install-rules`, a dependency of `make install`) |
 
 Steps 1–4 are all automated inside `make build` and fail the build if violated.
 
@@ -69,26 +72,36 @@ make logs
 
 | # | Check | How | Pass |
 |---|---|---|---|
-| 10 | `start_filter` fires | after enabling | `startFilter: provider started (observe-only build…)` |
-| 11 | Flows arrive | browse in Safari | `FLOW1 {…}` lines appear |
+| 10a | Rules loaded | after enabling | `rules: loaded 0 rule(s), default=allow from /Library/Application Support/Digiexam/rules.json` |
+| 10 | `start_filter` fires | after enabling | `startFilter: provider started` |
+| 11 | Flows arrive | browse in Safari | `allow …` lines appear |
 | 12 | Digiexam's own traffic | any request from the app | the app's own flows appear |
-| 13 | IPv4 | `curl -4 https://example.com` | a record with `"family":"V4"` |
-| 14 | IPv6 | `curl -6 https://ipv6.google.com` | a record with `"family":"V6"` |
-| 15 | TCP | browsing | `"protocol":"Tcp"` |
-| 16 | UDP | `dig @8.8.8.8 example.com` | `"protocol":"Udp"` |
-| 17 | Ports and hosts | any of the above | `remote_host` and `remote_port` populated |
-| 18 | **Nothing is blocked** | browse normally throughout | no connection failures anywhere on the machine |
-| 19 | UI shows flows | app window | table fills within ~1s; "Flows seen" climbs |
+| 13 | IPv4 | `curl -4 https://example.com` | a line showing `IPv4` |
+| 14 | IPv6 | `curl -6 https://ipv6.google.com` | a line showing `IPv6` |
+| 15 | TCP | browsing | a line showing `TCP` |
+| 16 | UDP | `dig @8.8.8.8 example.com` | a line showing `UDP` |
+| 17 | Ports and hosts | any of the above | host and port shown, e.g. `93.184.216.34:443 host=example.com` |
+| 18 | **Nothing is blocked** | browse normally throughout | no connection failures anywhere on the machine; every logged line starts `allow` |
 
-On item 17: some records legitimately show `"remote_host":null` and
-`(not yet known)` in the UI. Apple documents `remoteEndpoint` as possibly nil at
-`handleNewFlow:` time, populated only once data flows. That is normal, not a gap.
+On item 17: some lines legitimately read `(endpoint not yet known)` instead of a host and port.
+Apple documents `remoteEndpoint` as possibly nil at `handleNewFlow:` time, populated only once
+data flows. That is normal, not a gap.
 
-Only flow records for `curl` are worth grepping directly:
+Only flow lines are worth grepping directly:
 
 ```bash
 make logs-flows
 ```
+
+### Rules smoke test — proves the seam is wired, not just written
+
+No rebuild needed; this is the point.
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 19a | Deny takes effect | `sudo` edit `/Library/Application Support/Digiexam/rules.json` to `{"default_action":"drop","rules":[]}`, then click **Disable** then **Enable filter** in the app | `make logs` shows the reload line with `default=drop`; `make logs-flows` shows `drop …` lines; browsing actually fails |
+| 19b | Revert | change the file back to `{"default_action":"allow","rules":[]}`, disable/enable again | reload line shows `default=allow`; browsing works again |
+| 19c | Fail-open on a bad file | `sudo mv` the file aside, disable/enable | `make logs` shows a `rules: COULD NOT LOAD` line; traffic still flows (fails open, as documented in `rules.rs`) — then restore the file and disable/enable once more |
 
 ---
 
@@ -127,6 +140,7 @@ reboot, `CFBundleVersion` is moving when it should not.
 |---|---|
 | Filter shows in System Settings, no flows | `make status` — is anything `active`? This is *the* classic failure. |
 | Nothing in `make logs` at all | Is the provider process running? Does the Info.plist class match `#[name=…]`? `assemble-sysext.sh` asserts this. |
+| Every flow reads `drop`, unexpectedly | Check `/Library/Application Support/Digiexam/rules.json` — `default_action` may have been left at `drop` from an earlier test. |
 | Activation fails immediately | Is the app in `/Applications`? |
 | App launches then dies, or won't launch | AMFI 163: `make check`, and see [signing.md](signing.md). |
 | "staged — restart the Mac" | `CFBundleVersion` changed; see [`macos/identity.sh`](../macos/identity.sh). |

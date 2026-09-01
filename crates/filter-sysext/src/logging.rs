@@ -2,8 +2,8 @@
 //!
 //! `eprintln!` alone is not reliable inside a NetworkExtension provider — the process is launched
 //! by `nesessionmanager` and its stderr generally goes nowhere you can see. `os_log` is what
-//! actually surfaces, in Console.app and `log stream`, and it is also the transport the container
-//! app uses to read flow records back (see `filter-types`).
+//! actually surfaces, in Console.app and `log stream`, and it is also what `make logs` /
+//! `make logs-flows` filter on.
 //!
 //! Read this extension's output with:
 //!
@@ -14,8 +14,6 @@
 use std::ffi::{c_char, c_void, CString};
 use std::sync::OnceLock;
 
-use filter_types::{FlowRecord, LOG_CATEGORY_FLOW, LOG_CATEGORY_LIFECYCLE, LOG_SUBSYSTEM};
-
 // Provided by oslog_shim.c (built by build.rs). `os_log` itself is a macro in <os/log.h> and has
 // no exported symbol to link against, so the shim calls it from C on our behalf.
 unsafe extern "C" {
@@ -24,6 +22,17 @@ unsafe extern "C" {
     /// Wraps `os_log(log, "%{public}s", msg)` at the default level.
     fn digiexam_log_public_str(log: *mut c_void, msg: *const c_char);
 }
+
+/// The os_log subsystem this extension logs under. `make logs` builds its predicate from the
+/// same string (see the Makefile's `SUBSYSTEM` variable) — they must agree or `make logs` goes
+/// silently empty.
+const LOG_SUBSYSTEM: &str = "com.digiexam.macos.NetworkExtensions";
+
+/// Category for provider lifecycle events (start/stop/rules loaded).
+const LOG_CATEGORY_LIFECYCLE: &str = "lifecycle";
+/// Category for per-flow lines. Kept separate from lifecycle so `make logs-flows` can filter with a
+/// predicate instead of a grep.
+const LOG_CATEGORY_FLOW: &str = "flow";
 
 /// `os_log_t` handles are immortal for the life of the process, so they are created once and
 /// reused. Stored as raw pointers; they are never dereferenced by us, only handed back to os_log.
@@ -62,15 +71,12 @@ fn emit(category: &str, cell: &'static OnceLock<LogHandle>, msg: &str) {
 static LIFECYCLE: OnceLock<LogHandle> = OnceLock::new();
 static FLOW: OnceLock<LogHandle> = OnceLock::new();
 
-/// Log a provider lifecycle event (start, stop, class registration).
+/// Log a provider lifecycle event (start, stop, class registration, rules load).
 pub fn lifecycle(msg: &str) {
     emit(LOG_CATEGORY_LIFECYCLE, &LIFECYCLE, msg);
 }
 
-/// Log one flow as a machine-readable record.
-///
-/// This is the line the container app parses; the format lives in `filter-types` so encoder and
-/// decoder cannot drift.
-pub fn flow(record: &FlowRecord) {
-    emit(LOG_CATEGORY_FLOW, &FLOW, &record.encode());
+/// Log one already-formatted flow line. See `flow::FlowInfo::log_line`.
+pub fn flow(line: &str) {
+    emit(LOG_CATEGORY_FLOW, &FLOW, line);
 }

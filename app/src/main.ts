@@ -1,8 +1,6 @@
 /**
- * Minimal UI for the observe-only content filter.
- *
- * Two jobs, per the MVP scope: switch the filter on and off, and show that flow data is really
- * reaching the app from the extension. Nothing here is meant to be the eventual product UI.
+ * Minimal UI for the content filter: switch it on and off, and show what state macOS thinks it's
+ * in. Flow traffic is watched in a terminal (`make logs-flows`), not here — see rules.rs for why.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -15,28 +13,10 @@ type ActivationState =
   | { state: "needs_reboot" }
   | { state: "failed"; detail: string };
 
-/** Mirrors `filter_types::AddressFamily` / `TransportProtocol`. */
-type Family = "V4" | "V6" | { Other: number };
-type Proto = "Tcp" | "Udp" | { Other: number };
-
-/** Mirrors `filter_types::FlowRecord`. */
-interface FlowRecord {
-  ts_ms: number;
-  family: Family;
-  protocol: Proto;
-  remote_host: string | null;
-  remote_port: number | null;
-  hostname: string | null;
-  url_host: string | null;
-  source_app: string | null;
-  verdict: "Allow" | "Drop";
-}
-
 /** Mirrors `filter_types::FilterStatus`. */
 interface FilterStatus {
   activation: ActivationState;
   enabled: boolean;
-  flows_seen: number;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -47,10 +27,7 @@ const els = {
   remove: $<HTMLButtonElement>("remove"),
   activation: $<HTMLElement>("activation"),
   enabled: $<HTMLElement>("enabled"),
-  count: $<HTMLElement>("count"),
   message: $<HTMLParagraphElement>("message"),
-  flows: $<HTMLTableElement>("flows"),
-  empty: $<HTMLParagraphElement>("empty"),
 };
 
 function showMessage(text: string, isError = false) {
@@ -98,56 +75,12 @@ function renderStatus(status: FilterStatus) {
   renderActivation(status.activation);
   els.enabled.textContent = status.enabled ? "enabled" : "disabled";
   els.enabled.className = status.enabled ? "state-active" : "";
-  els.count.textContent = String(status.flows_seen);
-}
-
-const label = (v: Family | Proto): string =>
-  typeof v === "string" ? v.toUpperCase() : `(${v.Other})`;
-
-const time = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour12: false });
-
-function renderFlows(flows: FlowRecord[]) {
-  els.flows.hidden = flows.length === 0;
-  els.empty.hidden = flows.length > 0;
-
-  const body = els.flows.tBodies[0];
-  body.replaceChildren(
-    ...flows.map((f) => {
-      const tr = document.createElement("tr");
-      const dest = f.url_host ?? f.hostname ?? f.remote_host;
-
-      const cells: Array<[string, string]> = [
-        [time(f.ts_ms), ""],
-        // A null destination is normal, not a bug: Apple documents remoteEndpoint as possibly
-        // nil at handleNewFlow: time, populated only once data flows. Shown explicitly so it
-        // does not read as the filter missing traffic.
-        [dest ?? "(not yet known)", dest ? "dest" : "dest pending"],
-        [f.remote_port === null ? "—" : String(f.remote_port), ""],
-        [label(f.protocol), ""],
-        [f.family === "V4" ? "IPv4" : f.family === "V6" ? "IPv6" : label(f.family), ""],
-        [f.verdict, ""],
-      ];
-
-      for (const [text, cls] of cells) {
-        const td = document.createElement("td");
-        td.textContent = text;
-        if (cls) td.className = cls;
-        tr.appendChild(td);
-      }
-      return tr;
-    }),
-  );
 }
 
 async function refresh() {
   try {
-    const [status, flows] = await Promise.all([
-      invoke<FilterStatus>("plugin:content-filter|filter_status"),
-      invoke<FlowRecord[]>("plugin:content-filter|recent_flows", { limit: 200 }),
-    ]);
+    const status = await invoke<FilterStatus>("plugin:content-filter|filter_status");
     renderStatus(status);
-    renderFlows(flows);
   } catch (e) {
     // Polling errors are not worth a banner every tick; the status row already shows staleness.
     console.error("refresh failed", e);
@@ -184,4 +117,6 @@ els.remove.addEventListener("click", () =>
 );
 
 void refresh();
-setInterval(() => void refresh(), 500);
+// No table to keep fresh any more — flows are watched in a terminal — so a slower poll is enough
+// to keep the status rows in sync with macOS.
+setInterval(() => void refresh(), 2000);

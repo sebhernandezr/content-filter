@@ -4,7 +4,6 @@ const COMMANDS: &[&str] = &[
     "disable_filter",
     "remove_filter",
     "filter_status",
-    "recent_flows",
 ];
 
 fn main() {

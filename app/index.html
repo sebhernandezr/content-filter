@@ -26,31 +26,12 @@
         <dd id="activation">—</dd>
         <dt>Configuration</dt>
         <dd id="enabled">—</dd>
-        <dt>Flows seen</dt>
-        <dd id="count">0</dd>
       </dl>
 
       <p id="message" class="message" hidden></p>
-    </section>
-
-    <section class="panel">
-      <h2>Recent flows</h2>
-      <p id="empty" class="hint">
-        Nothing yet. Enable the filter, then browse — flows appear here within a second.
+      <p class="hint">
+        Watch traffic in a terminal with <code>make logs-flows</code>.
       </p>
-      <table id="flows" hidden>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Destination</th>
-            <th>Port</th>
-            <th>Proto</th>
-            <th>Family</th>
-            <th>Verdict</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
     </section>
 
     <script type="module" src="/src/main.ts"></script>

@@ -6,13 +6,10 @@
 //! them from the main thread would deadlock against the very run loop that has to service the
 //! completion handlers.
 
-use filter_types::{ActivationState, FilterStatus, FlowRecord};
+use filter_types::{ActivationState, FilterStatus};
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::{filter_manager, flow_log, sysext, FilterState};
-
-/// How many records the flow view asks for at a time.
-const DEFAULT_FLOW_LIMIT: usize = 200;
+use crate::{filter_manager, sysext, FilterState};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -90,34 +87,11 @@ pub(crate) async fn filter_status<R: Runtime>(app: AppHandle<R>) -> CmdResult<Fi
     status_now(&app).await
 }
 
-/// Most recently observed flows, newest first.
-#[tauri::command]
-pub(crate) async fn recent_flows<R: Runtime>(
-    app: AppHandle<R>,
-    limit: Option<usize>,
-) -> CmdResult<Vec<FlowRecord>> {
-    let state = app.state::<FilterState>();
-    let buf = state
-        .flows
-        .lock()
-        .map_err(|_| "flow buffer lock poisoned".to_owned())?;
-    Ok(buf.recent(limit.unwrap_or(DEFAULT_FLOW_LIMIT)))
-}
-
 /// Read the live status: configuration state from NEFilterManager, activation state from what we
-/// last observed, flow count from the buffer.
+/// last observed.
 async fn status_now<R: Runtime>(app: &AppHandle<R>) -> CmdResult<FilterStatus> {
     let enabled = blocking(filter_manager::is_enabled).await??;
     let state = app.state::<FilterState>();
     let activation = state.activation.lock().unwrap().clone();
-    let flows_seen = state
-        .flows
-        .lock()
-        .map(|b| flow_log::FlowBuffer::total(&b))
-        .unwrap_or(0);
-    Ok(FilterStatus {
-        activation,
-        enabled,
-        flows_seen,
-    })
+    Ok(FilterStatus { activation, enabled })
 }

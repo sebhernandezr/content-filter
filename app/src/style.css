@@ -84,15 +84,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .message.error { border-color: var(--err); color: var(--err); }
 
-.hint { color: var(--muted); margin: 0; }
-
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td {
-  text-align: left;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
+.hint { color: var(--muted); margin: 14px 0 0; }
+.hint code {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
 }
-th { color: var(--muted); font-weight: 500; }
-td.dest { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
-td.pending { color: var(--muted); font-style: italic; }

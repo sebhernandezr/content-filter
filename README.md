@@ -4,17 +4,19 @@ A system-wide network content filter for macOS: an `NEFilterDataProvider` packag
 **system extension**, written in Rust, driven by a Tauri container app.
 
 > **This is the observe-only MVP.** Every network flow on the machine is logged and
-> **allowed**. Nothing is blocked. The allow/block logic and the allowlist are the next
-> ticket — they replace one expression in
-> [`crates/filter-sysext/src/provider.rs`](crates/filter-sysext/src/provider.rs).
+> **allowed**. Nothing is blocked. The allow/drop decision already has a seam —
+> [`crates/filter-sysext/src/rules.rs`](crates/filter-sysext/src/rules.rs) — but the shipped
+> rules file allows everything, so writing real rules is the next ticket.
 
 ## Quick start
 
 ```bash
 make check      # signing preflight — run this first, and whenever signing misbehaves
 make build      # signed Digiexam.app with the extension embedded
-make install    # copy to /Applications and launch (sysexts ONLY activate from there)
+make install    # copy to /Applications, install rules.json, and launch (sysexts ONLY
+                # activate from /Applications)
 make logs       # watch the extension's output
+make logs-flows # watch flow records only — this is how you see traffic; there is no UI table
 make status     # what macOS actually has installed and running
 ```
 
@@ -23,12 +25,13 @@ Then follow [docs/validation.md](docs/validation.md).
 ## Layout
 
 ```
-crates/filter-sysext/     the .systemextension executable (own cargo workspace)
-crates/filter-types/      the flow-log wire format, shared by extension and app
+crates/filter-sysext/     the .systemextension executable (own cargo workspace);
+                          flow.rs + rules.rs is where flows are read and decided
+crates/filter-types/      status types shared across the Tauri command boundary
 crates/tauri-plugin-content-filter/
-                          activation, NEFilterManager control, log tail, Tauri commands
-app/                      Tauri container app + minimal frontend
-macos/                    entitlements, sysext Info.plist template, identity.sh
+                          activation, NEFilterManager control, Tauri commands
+app/                      Tauri container app + minimal frontend (enable/disable, no flow table)
+macos/                    entitlements, sysext Info.plist template, identity.sh, rules.json seed
 scripts/                  check-signing / assemble-sysext / build-app
 docs/                     signing.md, validation.md
 ```
@@ -49,11 +52,13 @@ previous attempt was stuck in, with 15 staged extension copies and none ever act
 reports activation and configuration as two separate rows for this reason, and
 `ActivationState::NeedsReboot` is never collapsed into success.
 
-Flow records travel from the extension to the app over the **unified log**, not a shared
-App Group container: the extension runs as `root` and the app as the console user, so their
-group containers are different directories (`/var/root/…` vs `~/…`) and the app cannot read
-the extension's. `crates/filter-types/src/lib.rs` defines the log line format both sides
-use; `flow_log.rs` tails it with `log stream`.
+Flows are watched with `make logs-flows`, a `log stream` predicate over the extension's unified-log
+output — there is no UI table and no IPC channel for flow data. Rules are read from
+`/Library/Application Support/Digiexam/rules.json`, not from the extension's own bundle: the
+extension runs as `root` and the app as the console user, so a path under either one's home
+directory would resolve to two different places for the two of them (the same split that rules
+out a shared App Group container here), and the bundle itself is sealed by the code signature —
+writable rules need to live outside it. See `crates/filter-sysext/src/rules.rs`.
 
 ## Things that will cost you a day if you forget
 

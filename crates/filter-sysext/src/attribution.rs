@@ -1,8 +1,8 @@
 //! Source-app attribution — resolving which application opened a flow.
 //!
 //! **Off by default in this MVP.** Flip [`LOG_SOURCE_APP`] to `true` to enable it; the rest of
-//! the pipeline (the `source_app` field, the log format, the UI column) is already wired, so this
-//! is genuinely a one-line change.
+//! the pipeline (the `source_app` field on `flow::FlowInfo`) is already wired, so this is
+//! genuinely a one-line change.
 //!
 //! # What enabling it actually involves
 //!
@@ -46,8 +46,8 @@ pub const LOG_SOURCE_APP: bool = false;
 
 /// Bundle identifier of the app that opened `flow`, or `None`.
 ///
-/// Always `None` while [`LOG_SOURCE_APP`] is `false`. `filter_types::FlowRecord::source_app`
-/// carries the result.
+/// Always `None` while [`LOG_SOURCE_APP`] is `false`. `flow::FlowInfo::source_app` carries the
+/// result.
 pub fn source_bundle_id(_flow: &NEFilterFlow) -> Option<String> {
     if !LOG_SOURCE_APP {
         return None;

@@ -3,16 +3,18 @@ SYSEXT_ID := com.digiexam.macos.NetworkExtensions.ContentFilter
 PRODUCT   := Digiexam
 SUBSYSTEM := com.digiexam.macos.NetworkExtensions
 
-.PHONY: help check build sysext install logs logs-flows test fmt clean clean-sysext status
+.PHONY: help check build sysext install install-rules logs logs-flows test fmt clean clean-sysext status
 
 help:
 	@echo "make check         signing preflight (certs, profiles, entitlements)"
 	@echo "make sysext        build + sign the .systemextension only"
 	@echo "make build         full signed $(PRODUCT).app with the extension embedded"
-	@echo "make install       copy to /Applications and launch (REQUIRED: sysexts only"
-	@echo "                   activate from /Applications)"
-	@echo "make logs          tail the extension's unified log output"
-	@echo "make logs-flows    tail flow records only"
+	@echo "make install       copy to /Applications, install rules.json, and launch"
+	@echo "                   (REQUIRED: sysexts only activate from /Applications)"
+	@echo "make install-rules install/refresh rules.json under /Library/Application Support"
+	@echo "                   (needs sudo — that directory is admin-owned)"
+	@echo "make logs          watch traffic: tail the extension's unified log output"
+	@echo "make logs-flows    watch traffic: tail flow records only — this is how you see it"
 	@echo "make status        what macOS thinks is installed and enabled"
 	@echo "make test          run the Rust test suites"
 	@echo "make clean-sysext  how to clear staged extension copies"
@@ -28,12 +30,25 @@ build:
 
 # System extensions are refused from anywhere but /Applications: activating from dist/, a
 # Downloads folder, or a mounted DMG fails with OSSystemExtensionErrorUnsupportedParentBundleLocation.
-install: build
+install: build install-rules
 	@echo "==> installing to /Applications/$(PRODUCT).app"
 	@rm -rf "/Applications/$(PRODUCT).app"
 	@cp -R "dist/$(PRODUCT).app" /Applications/
 	@echo "==> launching"
 	@open "/Applications/$(PRODUCT).app"
+
+# The extension reads rules from here at runtime (crates/filter-sysext/src/rules.rs), not from
+# its own bundle: the bundle is sealed by the code signature, and rules need to be writable so a
+# backend can update them later without a rebuild. Root-owned so non-admin users cannot edit it;
+# see rules.rs's module doc for what that protection does and does not buy.
+RULES_DIR := /Library/Application Support/Digiexam
+install-rules:
+	@echo "==> installing rules.json to $(RULES_DIR) (sudo required)"
+	@sudo mkdir -p "$(RULES_DIR)"
+	@sudo cp macos/rules.json "$(RULES_DIR)/rules.json"
+	@sudo chown -R root:wheel "$(RULES_DIR)"
+	@sudo chmod 755 "$(RULES_DIR)"
+	@sudo chmod 644 "$(RULES_DIR)/rules.json"
 
 logs:
 	@echo "==> streaming subsystem $(SUBSYSTEM) (ctrl-c to stop)"

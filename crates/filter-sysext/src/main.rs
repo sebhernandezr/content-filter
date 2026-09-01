@@ -26,6 +26,7 @@ mod attribution;
 mod flow;
 mod logging;
 mod provider;
+mod rules;
 
 use objc2::ClassType;
 use objc2_network_extension::NEProvider;
@@ -37,6 +38,12 @@ unsafe extern "C" {
 
 fn main() {
     logging::lifecycle("main: content-filter extension starting");
+
+    // Loaded again in `startFilter`, so this first load only matters for flows that could
+    // theoretically arrive before the framework ever calls startFilter (it does not, in
+    // practice) — done here mainly so a broken rules file is visible in the log as early as
+    // possible rather than only once the filter is first enabled.
+    rules::reload();
 
     // Force a static reference to the class so the linker cannot dead-strip it, and so it is
     // registered with the ObjC runtime before startSystemExtensionMode looks it up.

@@ -4,11 +4,11 @@ This document explains how the Digiexam macOS Content Filter works end-to-end: h
 
 ## Overview
 
-The content filter is a **system-wide network monitoring tool** built as a macOS **system extension** (not an app extension). It observes every network connection on the machine and logs the details, without blocking anything (the "observe-only MVP" — enforcement is planned for a follow-up).
+The content filter is a **system-wide network monitoring tool** built as a macOS **system extension** (not an app extension). It observes every network connection on the machine and logs the details. The shipped rules file allows everything, so nothing is blocked yet — but the allow/drop decision already runs through `rules.rs` (see Layer 1 and "Rules and Enforcement" below), so writing real rules is the next ticket, not a restructuring one.
 
 Two main components:
 1. **The System Extension** (`crates/filter-sysext/`) — a privileged process running as `root` that intercepts network flows
-2. **The Container App** (`app/`) — a Tauri app running as the console user that controls the extension and displays logs
+2. **The Container App** (`app/`) — a Tauri app running as the console user that controls the extension. It does not display flows; watch those in a terminal with `make logs-flows`.
 
 ## The Two-Step Model (Critical)
 
@@ -39,7 +39,7 @@ System Extension binary starts
 handleNewFlow: callback is now live
 ```
 - File: `crates/tauri-plugin-content-filter/src/filter_manager.rs`
-- Result: Flows are now being logged
+- Result: Flows are now being observed and decided on
 - **Step 2 can succeed even if Step 1 failed silently** — this was the bug the previous attempt got stuck in
 
 **Why separate them?** Because the previous codebase did step 2 without verifying step 1, and ended up with 15 staged extension copies, none of them actually running, while the UI claimed success. This design forces the failure to be visible: the UI shows activation state and configuration state as two separate rows. `ActivationState::NeedsReboot` (meaning the extension is staged but not active) never collapses into success.
@@ -48,69 +48,80 @@ handleNewFlow: callback is now live
 
 ### Layer 1: System Extension (Filter Provider)
 
-**What it does:** Receives every new network connection on the machine and logs it.
+**What it does:** Receives every new network connection on the machine, decides what to do with it, and logs the outcome.
 
 **Files:**
-- `crates/filter-sysext/src/main.rs` — entry point: registers the provider class, calls `NEProvider.startSystemExtensionMode()`, parks forever
+- `crates/filter-sysext/src/main.rs` — entry point: loads rules once, registers the provider class, calls `NEProvider.startSystemExtensionMode()`, parks forever
 - `crates/filter-sysext/src/provider.rs` — `FilterProvider` class (ObjC, via objc2): implements three lifecycle methods
-  - `startFilter()` — called when NEFilterManager enables the filter; logs that it started
+  - `startFilter()` — called when NEFilterManager enables the filter; **reloads rules from disk** (so toggling the filter off and on picks up a rules file a backend has since rewritten, no rebuild or reboot needed), then logs that it started
   - `stopFilter()` — called when the filter is disabled or configuration is removed; logs the reason code
-  - `handleNewFlow()` — **the hot path**: called once per new connection (concurrently, from the framework's queue); extracts flow details and logs them
-- `crates/filter-sysext/src/flow.rs` — `record_for()`: turns a raw `NEFilterFlow` into a `FlowRecord` struct with fields like remote IP, port, hostname (if available), resolved domain (if WebKit), source app
+  - `handleNewFlow()` — **the hot path**: called once per new connection (concurrently, from the framework's queue); extracts flow details, asks `rules::decide()` for a verdict, logs the outcome, returns `allowVerdict()` or `dropVerdict()`
+- `crates/filter-sysext/src/flow.rs` — `info_for()`: turns a raw `NEFilterFlow` into a `FlowInfo` struct with fields like remote IP, port, hostname (if available), resolved domain (if WebKit), source app; `FlowInfo::log_line()` renders one human-readable log line
+- `crates/filter-sysext/src/rules.rs` — the allow/deny seam: `RuleSet::decide()` matches a `FlowInfo` against an ordered list of host/port rules and falls back to a default action; see "Rules and Enforcement" below
 - `crates/filter-sysext/src/logging.rs` — logs to the unified log system (`os_log`) under subsystem `com.digiexam.macos.NetworkExtensions`
-- `crates/filter-sysext/src/attribution.rs` — source app identification (which bundle ID made the connection)
+- `crates/filter-sysext/src/attribution.rs` — source app identification (which bundle ID made the connection); off by default in this MVP
 
 **Runs as:** `root` (required by the NetworkExtension framework)
 
 **Lifecycle:**
 1. Spawned by macOS only after the container app calls `NEFilterManager.saveToPreferences()`
-2. Immediately calls `startFilter()` to report readiness
+2. Immediately calls `startFilter()`, which reloads rules and reports readiness
 3. Waits on `dispatch_main()` — parks forever, processing `handleNewFlow()` callbacks from the framework
 4. When the filter is disabled, `stopFilter()` is called and the process exits (or remains idle until re-enabled)
 
-**Important:** The provider itself does **not** decide allow/block — it only logs. The default framework action is `NEFilterActionFilterData` (deliver every flow), and the provider returns `allowVerdict()` unconditionally (line 94 of provider.rs has a comment saying "this expression is replaced in the enforcement ticket").
+**The decision itself:** the default framework action is `NEFilterActionFilterData` (deliver every flow to `handleNewFlow:`); no `NEFilterSettings` are applied because that default already does what's needed. What `handleNewFlow:` returns is now `rules::current().decide(&info)` — see "Rules and Enforcement".
 
-### Layer 2: Unified Log (Inter-Process Communication)
+### Layer 2: Watching Flows
 
-The extension (running as root) and the app (running as console user) cannot share a writable file — their home directories are different (`/var/root/…` vs `~/…`). Instead, they communicate via the **unified log** (`os_log`).
+There is no IPC channel for flow data — no shared file, no App Group, no log-parsing pipeline into the app. The extension writes one readable line per flow to the unified log (`os_log`, subsystem `com.digiexam.macos.NetworkExtensions`, category `flow`), and you read it directly with a terminal:
 
-**How it works:**
-1. Extension writes log lines to the unified log with subsystem `com.digiexam.macos.NetworkExtensions`
-2. Container app runs `log stream --predicate 'subsystem == "com.digiexam.macos.NetworkExtensions"' --info` as a child process
-3. App captures each line and parses it into a `FlowRecord`
-4. Records are buffered in memory in a circular ring buffer
+```
+make logs-flows
+```
 
-**Files:**
-- `crates/filter-sysext/src/logging.rs` — writes: `os_log` calls using `os_log` crate
-- `crates/tauri-plugin-content-filter/src/flow_log.rs` — reads: spawns `log stream` subprocess, captures output, parses into `FlowRecord` structs, maintains ring buffer
-- `crates/filter-types/src/lib.rs` — defines `FlowRecord` struct and the log line format: `FLOW1 {json}` (the prefix allows both reader and writer to agree on format even if they diverge)
+which runs `log stream --predicate 'subsystem == "..." AND category == "flow"'`. This *is* the intended way to observe traffic — not a debugging fallback for a UI that used to exist. A prior version of this project tailed that same log stream from the container app, parsed it into structs, and rendered a live table; that machinery (`filter-types::FlowRecord`, `flow_log.rs`, the frontend table) has been removed because a terminal already does the job.
 
 ### Layer 3: Container App & Tauri Plugin
 
 The container app is a minimal Tauri app (Rust backend + TypeScript frontend) that:
 1. Drives extension activation (calling `OSSystemExtensionRequest`)
 2. Enables/disables the filter configuration (calling `NEFilterManager`)
-3. Reads the unified log and buffers flow records
-4. Exposes commands to the UI
+3. Exposes commands to the UI
 
 **Backend (Rust):**
-- `crates/tauri-plugin-content-filter/src/lib.rs` — Tauri plugin initialization; manages `FilterState` (shared state for activation, flows, log tail)
+- `crates/tauri-plugin-content-filter/src/lib.rs` — Tauri plugin initialization; manages `FilterState` (last observed activation state)
 - `crates/tauri-plugin-content-filter/src/commands.rs` — Tauri commands (invoked by frontend):
   - `enable_filter()` — activate + enable in one call
   - `disable_filter()` — disable the filter config
   - `remove_filter()` — remove config + deactivate extension
   - `filter_status()` — query current state
-  - `recent_flows()` — fetch buffered flow records
 - `crates/tauri-plugin-content-filter/src/sysext.rs` — `OSSystemExtensionRequest` API wrapper; submits activation/deactivation requests and waits for callbacks
 - `crates/tauri-plugin-content-filter/src/filter_manager.rs` — `NEFilterManager` API wrapper; enables/disables/removes filter config
+- `crates/filter-types/src/lib.rs` — `ActivationState` / `FilterStatus`, the only types that cross the Tauri command boundary
 
 All blocking APIs are called on a thread pool (not the main thread), because they dispatch to the main queue and wait for callbacks — calling from main would deadlock (the dispatch queue can't service callbacks while the main thread is blocked in the same API).
 
 **Frontend (TypeScript):**
-- `app/src/main.ts` — minimal UI with four buttons (Enable, Disable, Remove, Status) and a table of recent flows
+- `app/src/main.ts` — minimal UI: three buttons (Enable, Disable, Remove) and two status rows (Extension, Configuration). No flow table — see Layer 2.
 - `app/src/style.css` — styling
 - Calls backend commands via Tauri's `invoke()` API
-- Polls status every 500ms so the UI stays in sync with macOS state
+- Polls status every 2s so the UI stays in sync with macOS state
+
+## Rules and Enforcement
+
+Rules live in one file, read at a fixed path: `/Library/Application Support/Digiexam/rules.json`. Not inside the extension's own bundle — the bundle is sealed by the code signature, and rules need to be writable at runtime so a backend can push updates without a rebuild. Not under either process's home directory — the extension runs as `root` and the app as the console user, so `~/…` resolves to two different places for the two of them, the same split that rules out a shared App Group container.
+
+```json
+{ "default_action": "allow", "rules": [{ "action": "drop", "host": ".example.com", "port": 443 }] }
+```
+
+`host` may be an exact match or a leading-dot suffix (`.example.com` covers the apex and every subdomain). Rules are evaluated in order; the first match wins; no match falls through to `default_action`. The seed file ships `{"default_action": "allow", "rules": []}`, so this refactor changes no runtime behaviour.
+
+`make install-rules` (a dependency of `make install`) copies `macos/rules.json` to that path with `root:wheel` ownership and mode 644 — sudo is required because `/Library/Application Support` is admin-owned. That ownership stops a non-admin user from editing it and stops nothing else; it is not tamper-proof. Real enforcement will need the provider to verify a backend signature over the rules payload rather than trust the bytes on disk as-is.
+
+**This build fails open.** A missing or unparseable rules file logs the failure loudly and keeps whatever rule set was last loaded successfully (or allow-everything, before any load has succeeded). That is correct for an observe-only MVP and wrong for real lockdown — a filter that opens the network when its rules file goes missing is worse than no filter — so flipping the fallback to deny-by-default is a deliberate, tracked decision for the enforcement ticket, not something to "fix" in passing.
+
+**The constraint enforcement has to solve:** matching on `host` misses most flows at the point a verdict is required, because `remoteEndpoint` is documented as possibly nil at `handleNewFlow:` time and `remoteHostname` is populated only for Network.framework / NSURLSession flows. Blocking a site *by name* reliably needs `pauseVerdict` / `filterDataVerdict` plus reading the TLS ClientHello SNI in `handleOutboundDataFromFlow:`. `rules.rs` stops at the decision point deliberately, so that work has somewhere to land.
 
 ## Build Pipeline
 
@@ -223,7 +234,7 @@ UI: display "not activated"
 
 The filter intercepts at the **socket layer**, not the HTTP layer. This means:
 
-- **One `FlowRecord` per connection opening**, not per HTTP request
+- **One `FlowInfo` per connection opening**, not per HTTP request
 - **No request/response data**, only connection metadata: source app, destination IP, destination port, protocol (TCP/UDP), address family (IPv4/IPv6)
 - **Limited hostname visibility:**
   - `url_host` — populated **only** for WebKit flows (Safari, WKWebView). This is the actual URL hostname from the request.
@@ -243,7 +254,7 @@ Chrome has its own network stack (not WebKit, not NSURLSession). When you naviga
    - `hostname` = `null` (Chrome doesn't use NSURLSession)
    - `url_host` = `null` (not a WebKit flow)
    - `source_app` = `"com.google.Chrome"` (from Mach-O loader inspection)
-   - `verdict` = `Allow` (unconditionally)
+   - `rules::decide()` sees `host: None` in this shape, so any host-based rule is skipped and the verdict comes from `default_action` — `Allow` with the shipped rules file
 
 **To capture the hostname for non-Apple-networking apps, you'd need to:**
 - Parse TLS ClientHello SNI (Server Name Indication) from the raw bytes
@@ -270,18 +281,16 @@ See [docs/signing.md](signing.md) for the detailed explanation. Quick version:
 ## File & Data Flow
 
 ```
-FlowRecord is born:
+FlowInfo is born:
   NEFilterFlow (framework object)
-  → flow::record_for() extracts fields
-  → serializes to JSON
+  → flow::info_for() extracts fields
+  → rules::current().decide(&info) picks Allow or Drop
+  → info.log_line(action) renders one readable line
   → logged to os_log via logging::flow()
 
-FlowRecord is read:
-  log stream subprocess captures the line
-  → flow_log.rs parses JSON
-  → inserts into circular ring buffer
-  → frontend polls filter_status() / recent_flows()
-  → JavaScript renders into <table>
+FlowInfo is read:
+  a terminal, via `make logs-flows`
+  (no IPC, no ring buffer, no UI table — see Layer 2 above)
 ```
 
 ## State Machine (ActivationState)
@@ -311,8 +320,9 @@ The UI reports `Idle` when no activation has been attempted, and always shows th
 | Extension activation | `crates/tauri-plugin-content-filter/src/sysext.rs` |
 | Filter enable/disable | `crates/tauri-plugin-content-filter/src/filter_manager.rs` |
 | Network capture | `crates/filter-sysext/src/provider.rs` (callback), `flow.rs` (extraction) |
-| Data logging | `crates/filter-sysext/src/logging.rs` (write), `flow_log.rs` (read) |
-| Wire format | `crates/filter-types/src/lib.rs` |
+| Allow/deny decision | `crates/filter-sysext/src/rules.rs` |
+| Data logging | `crates/filter-sysext/src/logging.rs`; read it with `make logs-flows` |
+| Tauri command types | `crates/filter-types/src/lib.rs` |
 | UI commands | `crates/tauri-plugin-content-filter/src/commands.rs` |
 | UI rendering | `app/src/main.ts` |
 
@@ -329,8 +339,8 @@ The UI reports `Idle` when no activation has been attempted, and always shows th
 
 - `make status` — what's installed and running (via `systemextensionsctl list` and `pgrep`)
 - `make logs` — tail the unified log in real time
-- `make logs-flows` — tail only flow records
-- `make test` — Rust test suite (17 tests)
-- UI manually: enable → check logs → disable → remove
+- `make logs-flows` — tail only flow records; this is the primary way to watch traffic
+- `make test` — Rust test suite
+- UI manually: enable → watch `make logs-flows` → disable → remove
 
 See [docs/validation.md](validation.md) for the full checklist.

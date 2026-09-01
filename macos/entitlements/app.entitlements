@@ -55,8 +55,9 @@
     <true/>
 
     <!--
-      Must match sysext.entitlements exactly. Unused by the observe-only MVP (flow records travel
-      over the unified log; see crates/tauri-plugin-content-filter/src/flow_log.rs), but kept
+      Must match sysext.entitlements exactly. Unused today: flows are watched in a terminal via
+      the unified log, and rules read from a plain root owned path under /Library/Application
+      Support (see crates/filter-sysext/src/rules.rs), neither of which needs an App Group. Kept
       because the profile authorises it and adding it later means re-signing both bundles.
     -->
     <key>com.apple.security.application-groups</key>

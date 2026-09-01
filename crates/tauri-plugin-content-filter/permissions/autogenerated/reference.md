@@ -1,7 +1,7 @@
 ## Default Permission
 
 Allows the frontend to activate the content-filter system extension, enable and disable the
-filter, and read observed network flows.
+filter, and read its status.
 
 #### This default permission set includes the following:
 
@@ -10,7 +10,6 @@ filter, and read observed network flows.
 - `allow-disable-filter`
 - `allow-remove-filter`
 - `allow-filter-status`
-- `allow-recent-flows`
 
 ## Permission Table
 
@@ -121,32 +120,6 @@ Enables the filter_status command without any pre-configured scope.
 <td>
 
 Denies the filter_status command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`content-filter:allow-recent-flows`
-
-</td>
-<td>
-
-Enables the recent_flows command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`content-filter:deny-recent-flows`
-
-</td>
-<td>
-
-Denies the recent_flows command without any pre-configured scope.
 
 </td>
 </tr>

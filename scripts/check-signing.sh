@@ -102,6 +102,22 @@ for f in macos/entitlements/app.entitlements macos/entitlements/sysext.entitleme
 done
 
 echo
+echo "── Rules seed ────────────────────────────────────────────────────"
+# macos/rules.json is the seed `make install-rules` copies to
+# /Library/Application Support/Digiexam/rules.json. It never enters the signed bundle, but a
+# malformed seed would only be discovered when the extension logs a load failure at runtime — this
+# catches it at preflight instead.
+if [[ -f "$ROOT/macos/rules.json" ]]; then
+  if /usr/bin/python3 -m json.tool "$ROOT/macos/rules.json" >/dev/null 2>&1; then
+    ok "macos/rules.json is valid JSON"
+  else
+    bad "macos/rules.json is not valid JSON"
+  fi
+else
+  bad "macos/rules.json not found"
+fi
+
+echo
 echo "── Host capabilities ────────────────────────────────────────────"
 # Captured rather than piped: a spurious miss here would wrongly claim SIP is off and tell you
 # developer mode is available, which is worse than useless guidance.
