@@ -1,114 +1,64 @@
-:root {
-  color-scheme: light dark;
-  --bg: #f6f6f7;
-  --panel: #ffffff;
-  --text: #1b1b1f;
-  --muted: #6b6b76;
-  --line: #e2e2e6;
-  --accent: #2563eb;
-  --ok: #15803d;
-  --warn: #b45309;
-  --err: #b91c1c;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17171a;
-    --panel: #1f1f23;
-    --text: #ececf1;
-    --muted: #9a9aa5;
-    --line: #2e2e35;
-    --accent: #60a5fa;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --err: #f87171;
-  }
-}
-
 body {
+  font-family: system-ui, sans-serif;
   margin: 0;
-  padding: 24px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 13px;
+  padding: 20px;
 }
 
-header h1 { margin: 0 0 4px; font-size: 20px; }
-.subtitle { margin: 0 0 20px; color: var(--muted); }
-
-code {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-size: 12px;
+section {
+  margin-bottom: 24px;
 }
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 16px;
+h1 {
+  font-size: 18px;
 }
 
-h2 { margin: 0 0 12px; font-size: 14px; }
+h2 {
+  font-size: 15px;
+}
 
-.controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 8px 0;
+}
+
+dt {
+  color: #666;
+}
+
+dd {
+  margin: 0;
+}
 
 button {
   font: inherit;
-  padding: 7px 14px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: var(--accent);
-  color: #fff;
+  padding: 6px 12px;
+  margin-right: 8px;
   cursor: pointer;
 }
-button.secondary { background: transparent; color: var(--text); border-color: var(--line); }
-button:disabled { opacity: 0.5; cursor: default; }
 
-.status {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 16px;
-  margin: 0;
+button:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
-.status dt { color: var(--muted); }
-.status dd { margin: 0; font-variant-numeric: tabular-nums; }
 
-.state-active { color: var(--ok); font-weight: 600; }
-.state-warn { color: var(--warn); font-weight: 600; }
-.state-error { color: var(--err); font-weight: 600; }
-
-.message {
-  margin: 14px 0 0;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  white-space: pre-wrap;
+label {
+  display: inline-block;
+  margin-right: 12px;
 }
-.message.error { border-color: var(--err); color: var(--err); }
 
-.hint { color: var(--muted); margin: 8px 0 16px; }
-.panel > .hint:first-of-type { margin-top: -4px; }
-
-.test-controls label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.test-controls input {
+input {
   font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
+  padding: 4px 6px;
+  margin-left: 4px;
 }
-#test-host { width: 220px; }
-#test-port { width: 90px; }
+
+code {
+  background: #eee;
+  padding: 1px 4px;
+}
+
+.error {
+  color: #b00;
+}

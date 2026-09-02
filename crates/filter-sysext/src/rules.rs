@@ -14,10 +14,14 @@
 //! own bundle: it is sealed by the code signature, and writing into it invalidates the signature
 //! and stops the provider launching.
 //!
-//! `/Library/…` and deliberately not `~/Library/…`: this process runs as **root** and the
+//! `/Users/Shared/…` and deliberately not `~/Library/…`: this process runs as **root** and the
 //! container app as the console user, so a path under `~` resolves to two different directories
 //! for the two of them. That is the same split that makes a shared App Group container useless
-//! here. `/Library/Application Support` resolves identically for both.
+//! here. `/Users/Shared` resolves identically for both, and — unlike `/Library/Application
+//! Support` — needs no sudo and no ownership fixup to write into, because it is world-writable and
+//! sticky by default. That means any local user can rewrite the policy; that's accepted rather
+//! than worked around, because rules are moving to a backend-signed payload and filesystem
+//! ownership was never going to be the real trust boundary here.
 //!
 //! # This is an allowlist: `default_action` is `drop`
 //!
@@ -67,7 +71,7 @@ use crate::logging;
 
 /// The one place rules are read from. See the module docs for why it is here and not in the
 /// extension's bundle. Installed by `make install-rules`.
-pub const RULES_PATH: &str = "/Library/Application Support/Digiexam/rules.json";
+pub const RULES_PATH: &str = "/Users/Shared/Digiexam/rules.json";
 
 /// What to do with a flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

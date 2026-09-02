@@ -3,16 +3,17 @@ SYSEXT_ID := com.digiexam.macos.NetworkExtensions.ContentFilter
 PRODUCT   := Digiexam
 SUBSYSTEM := com.digiexam.macos.NetworkExtensions
 
-.PHONY: help check build sysext install install-rules logs logs-flows test fmt clean clean-sysext status
+.PHONY: help check build sysext install install-rules rules-force logs logs-flows test fmt clean clean-sysext status
 
 help:
 	@echo "make check         signing preflight (certs, profiles, entitlements)"
 	@echo "make sysext        build + sign the .systemextension only"
 	@echo "make build         full signed $(PRODUCT).app with the extension embedded"
-	@echo "make install       copy to /Applications, install rules.json, and launch"
+	@echo "make install       copy to /Applications, seed rules.json if absent, and launch"
 	@echo "                   (REQUIRED: sysexts only activate from /Applications)"
-	@echo "make install-rules install/refresh rules.json under /Library/Application Support"
-	@echo "                   (needs sudo — that directory is admin-owned)"
+	@echo "make install-rules seed rules.json under /Users/Shared if not already present"
+	@echo "                   (no sudo needed; leaves an existing file alone)"
+	@echo "make rules-force   overwrite rules.json from macos/rules.json unconditionally"
 	@echo "make logs          watch traffic: tail the extension's unified log output"
 	@echo "make logs-flows    watch traffic: tail flow records only — this is how you see it"
 	@echo "make status        what macOS thinks is installed and enabled"
@@ -39,16 +40,29 @@ install: build install-rules
 
 # The extension reads rules from here at runtime (crates/filter-sysext/src/rules.rs), not from
 # its own bundle: the bundle is sealed by the code signature, and rules need to be writable so a
-# backend can update them later without a rebuild. Root-owned so non-admin users cannot edit it;
-# see rules.rs's module doc for what that protection does and does not buy.
-RULES_DIR := /Library/Application Support/Digiexam
+# backend can update them later without a rebuild. /Users/Shared is already world-writable and
+# sticky, so this needs no sudo and no ownership fixup; see rules.rs's module doc for why that's
+# an acceptable tradeoff now that rules are headed for a backend-signed payload rather than
+# filesystem permissions as the trust boundary.
+RULES_DIR  := /Users/Shared/Digiexam
+RULES_FILE := $(RULES_DIR)/rules.json
+
+# Seeds the rules file only if it is not already there. `make install` depends on this, so an
+# unconditional copy here would silently discard edits made against the live file on every
+# rebuild. Use `make rules-force` to deliberately re-seed from macos/rules.json.
 install-rules:
-	@echo "==> installing rules.json to $(RULES_DIR) (sudo required)"
-	@sudo mkdir -p "$(RULES_DIR)"
-	@sudo cp macos/rules.json "$(RULES_DIR)/rules.json"
-	@sudo chown -R root:wheel "$(RULES_DIR)"
-	@sudo chmod 755 "$(RULES_DIR)"
-	@sudo chmod 644 "$(RULES_DIR)/rules.json"
+	@if [ -f "$(RULES_FILE)" ]; then \
+		echo "==> rules.json already present at $(RULES_FILE) — leaving it alone (make rules-force to re-seed)"; \
+	else \
+		echo "==> seeding rules.json to $(RULES_FILE)"; \
+		mkdir -p "$(RULES_DIR)"; \
+		cp macos/rules.json "$(RULES_FILE)"; \
+	fi
+
+rules-force:
+	@echo "==> overwriting $(RULES_FILE) from macos/rules.json"
+	@mkdir -p "$(RULES_DIR)"
+	@cp macos/rules.json "$(RULES_FILE)"
 
 logs:
 	@echo "==> streaming subsystem $(SUBSYSTEM) (ctrl-c to stop)"

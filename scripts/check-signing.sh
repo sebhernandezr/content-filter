@@ -104,7 +104,7 @@ done
 echo
 echo "── Rules seed ────────────────────────────────────────────────────"
 # macos/rules.json is the seed `make install-rules` copies to
-# /Library/Application Support/Digiexam/rules.json. It never enters the signed bundle, but a
+# /Users/Shared/Digiexam/rules.json. It never enters the signed bundle, but a
 # malformed seed would only be discovered when the extension logs a load failure at runtime — this
 # catches it at preflight instead.
 if [[ -f "$ROOT/macos/rules.json" ]]; then

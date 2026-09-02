@@ -120,7 +120,7 @@ destination; nothing else reaches it; that app reaches nothing else; and both IP
 covered. The first two require the rule key to include *who is asking*, not just *where to* — see
 "Why attribution has to be verified, not just read" below.
 
-Rules live in one file, read at a fixed path: `/Library/Application Support/Digiexam/rules.json`. Not inside the extension's own bundle — the bundle is sealed by the code signature, and rules need to be writable at runtime so a backend can push updates without a rebuild. Not under either process's home directory — the extension runs as `root` and the app as the console user, so `~/…` resolves to two different places for the two of them, the same split that rules out a shared App Group container.
+Rules live in one file, read at a fixed path: `/Users/Shared/Digiexam/rules.json`. Not inside the extension's own bundle — the bundle is sealed by the code signature, and rules need to be writable at runtime so a backend can push updates without a rebuild. Not under either process's home directory — the extension runs as `root` and the app as the console user, so `~/…` resolves to two different places for the two of them, the same split that rules out a shared App Group container. `/Users/Shared` resolves identically for both and is world-writable and sticky by default, so no sudo or ownership fixup is needed to seed or update it.
 
 ```json
 {
@@ -185,10 +185,13 @@ own "Test TCP connect" button does) carries no hostname anywhere the framework h
 instead, so an app can still be admitted to a destination it reaches without a name attached.
 
 `make install-rules` (a dependency of `make install`) copies `macos/rules.json` to the runtime path
-with `root:wheel` ownership and mode 644 — sudo is required because `/Library/Application Support`
-is admin-owned. That ownership stops a non-admin user from editing it and stops nothing else; it is
-not tamper-proof against an admin. Real lockdown will need the provider to verify a backend
-signature over the rules payload rather than trust the bytes on disk as-is.
+only if nothing is there yet, so a rebuild never clobbers rules a backend or a developer has
+already written live — `make rules-force` re-seeds deliberately. Neither needs sudo:
+`/Users/Shared` is world-writable by default, so the file is not protected by filesystem
+permissions at all — any local user can rewrite it. That's accepted rather than worked around:
+rules are headed for a backend-signed payload, and filesystem ownership was never going to be
+the real trust boundary. Real lockdown will need the provider to verify that signature over the
+rules payload rather than trust the bytes on disk as-is.
 
 **The ops fallback still fails open, deliberately kept separate from the policy pivot.** A missing
 or unparseable rules file logs the failure loudly and keeps whatever rule set was last loaded

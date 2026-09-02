@@ -10,7 +10,7 @@ The goal is four provable statements, in this order because each depends on the 
 4. IPv4 and IPv6 traffic are both filtered.
 
 The verdict comes from `rules::decide()` (`crates/filter-sysext/src/rules.rs`) against
-`/Library/Application Support/Digiexam/rules.json`, keyed on **both** destination and the app that
+`/Users/Shared/Digiexam/rules.json`, keyed on **both** destination and the app that
 opened the flow (`crates/filter-sysext/src/attribution.rs`). Note what is *not* claimed: the app
 name is what the OS reports, not a signature check, so this checklist proves the allowlist works —
 not that it resists a deliberately spoofed binary. That hardening is a separate, tracked follow-up.
@@ -43,8 +43,8 @@ Testing before this reboot means testing against whatever stale binary macOS sti
 | 3 | Universal slices | build output line `app arch: … sysext arch: …` | both show `x86_64 arm64` |
 | 4 | App signature | `codesign --verify --deep --strict --verbose=2 dist/Digiexam.app` | valid on disk; satisfies its Designated Requirement |
 | 5 | Install location | `make install` | app launches from `/Applications` |
-| 5a | Rules installed | `ls -l "/Library/Application Support/Digiexam/rules.json"` | exists, owned `root:wheel`, mode `644` (installed by `make install-rules`, a dependency of `make install`) |
-| 5b | Rules content | `cat "/Library/Application Support/Digiexam/rules.json"` | `default_action` is `"drop"`; a DNS rule on port 53; an allow rule naming `com.digiexam.macos.NetworkExtensions` (adjust to whatever the log's `app=` column shows for the app — see below) |
+| 5a | Rules installed | `ls -l "/Users/Shared/Digiexam/rules.json"` | exists (seeded by `make install-rules`, a dependency of `make install`, only if not already present) |
+| 5b | Rules content | `cat "/Users/Shared/Digiexam/rules.json"` | `default_action` is `"drop"`; a DNS rule on port 53; an allow rule naming `com.digiexam.macos.NetworkExtensions` (adjust to whatever the log's `app=` column shows for the app — see below) |
 
 Steps 1–4 are all automated inside `make build` and fail the build if violated.
 
@@ -88,7 +88,7 @@ our naming worked.
 
 | # | Check | How | Pass |
 |---|---|---|---|
-| 10 | Rules loaded | after enabling | `rules: loaded 3 rule(s), default=drop from /Library/Application Support/Digiexam/rules.json` |
+| 10 | Rules loaded | after enabling | `rules: loaded 3 rule(s), default=drop from /Users/Shared/Digiexam/rules.json` |
 | 11 | Webview fetch | in the app, "Test webview fetch" against the allowed host | panel shows `reachable`; log shows `allow … host=<allowed> app=com.digiexam.macos.NetworkExtensions(id)` or the path form |
 | 12 | TCP connect | in the app, "Test TCP connect" against the same host | panel shows `reachable`; log shows `allow` with the destination's IP under `ip=`-style matching (no `host=`, since a raw connect carries no name) |
 
@@ -190,7 +190,7 @@ should imply is already handled.
 | Nothing in `make logs` at all | Is the provider process running? Does the Info.plist class match `#[name=…]`? `assemble-sysext.sh` asserts this. |
 | Digiexam's own allowed request is blocked | Compare the rule's `app` against the log's `app=` column character for character, including which *form* it is — an `(id)` rule will never match a `(path)`-named flow or vice versa. Also confirm the flow has a `host=` at all; if not, match on `ip` instead. |
 | Everything reads `drop`, including DNS | Confirm the port-53 seed rule is still present in the installed `rules.json` — without it nothing resolves and every host rule is unreachable. |
-| Every flow reads `drop`, unexpectedly | Check `/Library/Application Support/Digiexam/rules.json` — `default_action` may have been left at `drop` from an earlier family/protocol test that wasn't reverted. |
+| Every flow reads `drop`, unexpectedly | Check `/Users/Shared/Digiexam/rules.json` — `default_action` may have been left at `drop` from an earlier family/protocol test that wasn't reverted. |
 | Activation fails immediately | Is the app in `/Applications`? |
 | App launches then dies, or won't launch | AMFI 163: `make check`, and see [signing.md](signing.md). |
 | "staged — restart the Mac" | `CFBundleVersion` changed; see [`macos/identity.sh`](../macos/identity.sh). |

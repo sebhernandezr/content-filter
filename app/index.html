@@ -7,64 +7,7 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <header>
-      <h1>Content Filter</h1>
-      <p class="subtitle">
-        Per-app allowlist — only apps and destinations named in <code>rules.json</code> are
-        reachable while the filter is enabled. Everything else is <strong>dropped</strong>.
-      </p>
-    </header>
-
-    <section class="panel">
-      <div class="controls">
-        <button id="enable" type="button">Enable filter</button>
-        <button id="disable" type="button" class="secondary">Disable</button>
-        <button id="remove" type="button" class="secondary">Remove</button>
-      </div>
-
-      <dl class="status">
-        <dt>Extension</dt>
-        <dd id="activation">—</dd>
-        <dt>Configuration</dt>
-        <dd id="enabled">—</dd>
-      </dl>
-
-      <p id="message" class="message" hidden></p>
-      <p class="hint">
-        Watch traffic in a terminal with <code>make logs-flows</code>.
-      </p>
-    </section>
-
-    <section class="panel">
-      <h2>Test the allowlist</h2>
-      <p class="hint">
-        Two different flow shapes, on purpose: the webview fetch carries a hostname the filter can
-        match by name; the TCP connect carries only an address, which is what the <code>ip</code>
-        matcher in <code>rules.json</code> exists for. Point both at an allowed host to prove
-        requirement 1, then at anything else to prove requirement 3.
-      </p>
-      <div class="controls test-controls">
-        <label>
-          Host
-          <input id="test-host" type="text" value="example.com" />
-        </label>
-        <label>
-          Port
-          <input id="test-port" type="number" value="443" min="1" max="65535" />
-        </label>
-      </div>
-      <div class="controls">
-        <button id="test-fetch" type="button" class="secondary">Test webview fetch</button>
-        <button id="test-connect" type="button" class="secondary">Test TCP connect</button>
-      </div>
-      <dl class="status">
-        <dt>Webview fetch</dt>
-        <dd id="fetch-result">—</dd>
-        <dt>TCP connect</dt>
-        <dd id="connect-result">—</dd>
-      </dl>
-    </section>
-
-    <script type="module" src="/src/main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

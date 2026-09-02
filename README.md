@@ -64,11 +64,12 @@ flow's audit token (see `crates/filter-sysext/src/attribution.rs`). That name is
 rule matches on; it is what the OS reports for the process, not a code-signature check, which
 that module's doc records as a deliberate deferral.
 
-Rules are read from `/Library/Application Support/Digiexam/rules.json`, not from the
+Rules are read from `/Users/Shared/Digiexam/rules.json`, not from the
 extension's own bundle: the extension runs as `root` and the app as the console user, so a
 path under either one's home directory would resolve to two different places for the two of
 them (the same split that rules out a shared App Group container here), and the bundle itself
-is sealed by the code signature — writable rules need to live outside it. See
+is sealed by the code signature — writable rules need to live outside it. `/Users/Shared`
+resolves identically for both and needs no sudo to write into. See
 `crates/filter-sysext/src/rules.rs`.
 
 ## Things that will cost you a day if you forget
