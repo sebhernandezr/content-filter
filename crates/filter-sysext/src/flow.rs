@@ -8,7 +8,7 @@
 //!
 //! `FlowInfo` used to be `filter_types::FlowRecord`, serialized as `FLOW1 {json}` and shipped to
 //! the container app over the unified log so a UI table could render it. There is no UI table any
-//! more — the terminal, via `make logs-flows`, is the intended way to watch flows — so this is a
+//! more — the terminal, via `make logs`, is the intended way to watch flows — so this is a
 //! plain struct with no serde derives, and it doubles as the input to [`crate::rules::decide`].
 
 use std::time::{SystemTime, UNIX_EPOCH};

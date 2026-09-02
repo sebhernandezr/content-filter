@@ -3,7 +3,7 @@ SYSEXT_ID := com.digiexam.macos.NetworkExtensions.ContentFilter
 PRODUCT   := Digiexam
 SUBSYSTEM := com.digiexam.macos.NetworkExtensions
 
-.PHONY: help check build sysext install install-rules rules-force dmg logs logs-flows test fmt clean clean-sysext status
+.PHONY: help check build sysext install install-rules rules-force dmg logs test fmt clean clean-sysext status
 
 help:
 	@echo "make check         signing preflight (certs, profiles, entitlements)"
@@ -17,8 +17,7 @@ help:
 	@echo "make install-rules seed rules.json under /Users/Shared if not already present"
 	@echo "                   (no sudo needed; leaves an existing file alone)"
 	@echo "make rules-force   overwrite rules.json from macos/rules.json unconditionally"
-	@echo "make logs          watch traffic: tail the extension's unified log output"
-	@echo "make logs-flows    watch traffic: tail flow records only — this is how you see it"
+	@echo "make logs          watch traffic: tail the extension's unified log output — this is how you see it"
 	@echo "make status        what macOS thinks is installed and enabled"
 	@echo "make test          run the Rust test suites"
 	@echo "make clean-sysext  how to clear staged extension copies"
@@ -72,10 +71,10 @@ dmg: build
 
 logs:
 	@echo "==> streaming subsystem $(SUBSYSTEM) (ctrl-c to stop)"
-	@log stream --style compact --predicate 'subsystem == "$(SUBSYSTEM)"'
-
-logs-flows:
-	@log stream --style compact --predicate 'subsystem == "$(SUBSYSTEM)" AND category == "flow"'
+	@log stream --style compact --predicate 'subsystem == "$(SUBSYSTEM)"' | sed -E -l \
+		-e '/^(Filtering|Timestamp)/d' \
+		-e 's/^[0-9-]+ ([0-9:.]+) +[A-Za-z]+ +[^][]+\[[0-9]+:[0-9a-f]+\] +\[[^]]+:([a-z]+)\] +/\1 \2 /' \
+		-e 's/^([0-9:.]+) lifecycle /\1 life /'
 
 status:
 	@echo "── installed system extensions ─────────────────────────────"

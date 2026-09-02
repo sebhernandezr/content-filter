@@ -9,7 +9,7 @@
 //! Flow records do **not** cross this boundary any more. Earlier, this crate also defined the
 //! `FLOW1 {json}` line format the extension emitted over the unified log and the app tailed back
 //! with `log stream`, to feed a live table in the app window. That table is gone — flows are read
-//! from a terminal now, with `make logs-flows` — so that wire format,
+//! from a terminal now, with `make logs` — so that wire format,
 //! and the crate's reason for being shared with `filter-sysext`, went with it. See
 //! `crates/filter-sysext/src/flow.rs` for the extension-side equivalent, which has no need to be
 //! shared or serializable.

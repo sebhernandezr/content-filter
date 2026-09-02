@@ -15,7 +15,7 @@
 //! reports "enabled", and no provider process exists to receive a single flow.
 //!
 //! Flow records themselves are not part of this plugin: watch them in a terminal with
-//! `make logs-flows`, not in the app window.
+//! `make logs`, not in the app window.
 
 #[cfg(target_os = "macos")]
 mod commands;

@@ -74,7 +74,7 @@ bumping the version and that is a bug.
 Open a log tail in a second terminal and leave it running:
 
 ```bash
-make logs-flows
+make logs
 ```
 
 Every line ends in `app=…(source) pid=…`. The `(id)` suffix means the name came from

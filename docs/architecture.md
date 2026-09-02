@@ -8,7 +8,7 @@ The content filter is a macOS **system extension** (not an app extension) that d
 
 Two main components:
 1. **The System Extension** (`crates/filter-sysext/`) — a privileged process running as `root` that intercepts network flows
-2. **The Container App** (`app/`) — a Tauri app running as the console user that controls the extension. It does not display flows; watch those in a terminal with `make logs-flows`.
+2. **The Container App** (`app/`) — a Tauri app running as the console user that controls the extension. It does not display flows; watch those in a terminal with `make logs`.
 
 ## The Two-Step Model (Critical)
 
@@ -76,10 +76,10 @@ handleNewFlow: callback is now live
 There is no IPC channel for flow data — no shared file, no App Group, no log-parsing pipeline into the app. The extension writes one readable line per flow to the unified log (`os_log`, subsystem `com.digiexam.macos.NetworkExtensions`, category `flow`), and you read it directly with a terminal:
 
 ```
-make logs-flows
+make logs
 ```
 
-which runs `log stream --predicate 'subsystem == "..." AND category == "flow"'`. This *is* the intended way to observe traffic — not a debugging fallback for a UI that used to exist. A prior version of this project tailed that same log stream from the container app, parsed it into structs, and rendered a live table; that machinery (`filter-types::FlowRecord`, `flow_log.rs`, the frontend table) has been removed because a terminal already does the job.
+which runs `log stream --predicate 'subsystem == "..."'` piped through a `sed` filter that strips the process/pid/subsystem prefix `log stream` puts on every line, leaving just a timestamp, a `flow`/`life` flag for the category, and the message — e.g. `08:56:38.061 flow allow UDP  IPv4 83.255.255.1:53  app=...`. This *is* the intended way to observe traffic — not a debugging fallback for a UI that used to exist. A prior version of this project tailed that same log stream from the container app, parsed it into structs, and rendered a live table; that machinery (`filter-types::FlowRecord`, `flow_log.rs`, the frontend table) has been removed because a terminal already does the job.
 
 ### Layer 3: Container App & Tauri Plugin
 
@@ -400,7 +400,7 @@ FlowInfo is born:
   → logged to os_log via logging::flow()
 
 FlowInfo is read:
-  a terminal, via `make logs-flows`
+  a terminal, via `make logs`
   (no IPC, no ring buffer, no UI table — see Layer 2 above)
 ```
 
@@ -433,7 +433,7 @@ The UI reports `Idle` when no activation has been attempted, and always shows th
 | Network capture | `crates/filter-sysext/src/provider.rs` (callback), `flow.rs` (extraction) |
 | App attribution | `crates/filter-sysext/src/attribution.rs` (sourceAppIdentifier / proc_pidpath) |
 | Allowlist decision | `crates/filter-sysext/src/rules.rs` |
-| Data logging | `crates/filter-sysext/src/logging.rs`; read it with `make logs-flows` |
+| Data logging | `crates/filter-sysext/src/logging.rs`; read it with `make logs` |
 | Tauri command types | `crates/filter-types/src/lib.rs` |
 | UI commands | `crates/tauri-plugin-content-filter/src/commands.rs` |
 | UI rendering | `app/src/main.ts` |
@@ -450,9 +450,8 @@ The UI reports `Idle` when no activation has been attempted, and always shows th
 ## Testing & Validation
 
 - `make status` — what's installed and running (via `systemextensionsctl list` and `pgrep`)
-- `make logs` — tail the unified log in real time
-- `make logs-flows` — tail only flow records; this is the primary way to watch traffic
+- `make logs` — tail the unified log in real time; this is the primary way to watch traffic
 - `make test` — Rust test suite
-- UI manually: enable → watch `make logs-flows` → disable → remove
+- UI manually: enable → watch `make logs` → disable → remove
 
 See [docs/validation.md](validation.md) for the full checklist.

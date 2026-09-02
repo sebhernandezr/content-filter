@@ -2,8 +2,8 @@
 //!
 //! `eprintln!` alone is not reliable inside a NetworkExtension provider — the process is launched
 //! by `nesessionmanager` and its stderr generally goes nowhere you can see. `os_log` is what
-//! actually surfaces, in Console.app and `log stream`, and it is also what `make logs` /
-//! `make logs-flows` filter on.
+//! actually surfaces, in Console.app and `log stream`, and it is also what `make logs` filters
+//! on.
 //!
 //! Read this extension's output with:
 //!
@@ -30,8 +30,9 @@ const LOG_SUBSYSTEM: &str = "com.digiexam.macos.NetworkExtensions";
 
 /// Category for provider lifecycle events (start/stop/rules loaded).
 const LOG_CATEGORY_LIFECYCLE: &str = "lifecycle";
-/// Category for per-flow lines. Kept separate from lifecycle so `make logs-flows` can filter with a
-/// predicate instead of a grep.
+/// Category for per-flow lines. Kept separate from lifecycle so a `log show`/`log stream`
+/// predicate can filter on it directly, and so `make logs` can render it as the `flow` flag
+/// distinct from `life`.
 const LOG_CATEGORY_FLOW: &str = "flow";
 
 /// `os_log_t` handles are immortal for the life of the process, so they are created once and

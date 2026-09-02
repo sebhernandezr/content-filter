@@ -17,8 +17,7 @@ make check      # signing preflight — run this first, and whenever signing mis
 make build      # signed Digiexam.app with the extension embedded
 make install    # copy to /Applications, install rules.json, and launch (sysexts ONLY
                 # activate from /Applications)
-make logs       # watch the extension's output
-make logs-flows # watch flow records only — this is how you see traffic; there is no UI table
+make logs       # watch the extension's output — this is how you see traffic; there is no UI table
 make status     # what macOS actually has installed and running
 ```
 
@@ -57,8 +56,8 @@ previous attempt was stuck in, with 15 staged extension copies and none ever act
 reports activation and configuration as two separate rows for this reason, and
 `ActivationState::NeedsReboot` is never collapsed into success.
 
-Flows are watched with `make logs-flows`, a `log stream` predicate over the extension's unified-log
-output — there is no UI table and no IPC channel for flow data. Every logged line names the app
+Flows are watched with `make logs`, which tails the extension's unified-log output — there is no
+UI table and no IPC channel for flow data. Every logged line names the app
 that opened the flow and its pid, from `sourceAppIdentifier` or the executable path behind the
 flow's audit token (see `crates/filter-sysext/src/attribution.rs`). That name is what an `app`
 rule matches on; it is what the OS reports for the process, not a code-signature check, which

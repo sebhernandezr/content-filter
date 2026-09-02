@@ -54,7 +54,7 @@ export function App() {
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [host, setHost] = useState("example.com");
+  const [host, setHost] = useState("digexam.com");
   const [port, setPort] = useState("443");
   const [fetchResult, setFetchResult] = useState<TestConnectResult | "testing" | null>(null);
   const [connectResult, setConnectResult] = useState<TestConnectResult | "testing" | null>(null);

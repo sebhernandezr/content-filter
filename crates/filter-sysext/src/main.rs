@@ -64,5 +64,5 @@ fn main() {
     // Park forever. The framework services provider callbacks on this queue; returning from main
     // would terminate the extension.
     // SAFETY: dispatch_main never returns and takes no arguments.
-    unsafe { dispatch_main() }
+    dispatch_main()
 }
