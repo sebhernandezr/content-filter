@@ -32,11 +32,7 @@ mod rules;
 
 use objc2::ClassType;
 use objc2_network_extension::NEProvider;
-
-unsafe extern "C" {
-    /// `dispatch_main()` — the C equivalent of Swift's `dispatchMain()`. Never returns.
-    fn dispatch_main() -> !;
-}
+use dispatch2::dispatch_main;
 
 fn main() {
     logging::lifecycle("main: content-filter extension starting");
