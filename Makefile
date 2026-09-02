@@ -3,7 +3,7 @@ SYSEXT_ID := com.digiexam.macos.NetworkExtensions.ContentFilter
 PRODUCT   := Digiexam
 SUBSYSTEM := com.digiexam.macos.NetworkExtensions
 
-.PHONY: help check build sysext install install-rules rules-force logs logs-flows test fmt clean clean-sysext status
+.PHONY: help check build sysext install install-rules rules-force dmg logs logs-flows test fmt clean clean-sysext status
 
 help:
 	@echo "make check         signing preflight (certs, profiles, entitlements)"
@@ -11,6 +11,9 @@ help:
 	@echo "make build         full signed $(PRODUCT).app with the extension embedded"
 	@echo "make install       copy to /Applications, seed rules.json if absent, and launch"
 	@echo "                   (REQUIRED: sysexts only activate from /Applications)"
+	@echo "make dmg           build + wrap $(PRODUCT).app in a signed DMG for manual install/sharing"
+	@echo "                   (not a substitute for install: dropping the app from a mounted DMG"
+	@echo "                   into /Applications still needs a plain Finder drag, then activation)"
 	@echo "make install-rules seed rules.json under /Users/Shared if not already present"
 	@echo "                   (no sudo needed; leaves an existing file alone)"
 	@echo "make rules-force   overwrite rules.json from macos/rules.json unconditionally"
@@ -63,6 +66,9 @@ rules-force:
 	@echo "==> overwriting $(RULES_FILE) from macos/rules.json"
 	@mkdir -p "$(RULES_DIR)"
 	@cp macos/rules.json "$(RULES_FILE)"
+
+dmg: build
+	@./scripts/build-dmg.sh
 
 logs:
 	@echo "==> streaming subsystem $(SUBSYSTEM) (ctrl-c to stop)"

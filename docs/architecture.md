@@ -144,7 +144,7 @@ to `default_action`.
 
 | matcher | matches against | notes |
 |---|---|---|
-| `app` | `AppId.name` | an application identifier or an executable path, whichever the OS reported — see below |
+| `app` | `AppId::matches_rule` | a bundle identifier, or the verbatim reported name (`<team>.<bundle>`, or an executable path) — see below |
 | `host` | `FlowInfo::best_destination()` | exact, or a leading-dot suffix (`.example.com` covers the apex and every subdomain) |
 | `ip` | `FlowInfo.remote_host` | exact literal only, no CIDR; the escape hatch for a flow that carries an address but no name — see below |
 | `port` | `FlowInfo.remote_port` | |
@@ -167,8 +167,23 @@ their connections through `com.apple.WebKit.Networking`, so the process token wo
 this app's own webview the *same* identity and make "Safari cannot, Digiexam can" unprovable.
 
 Because the two sources produce different *forms* of name, the flow log tags each with `(id)` or
-`(path)`, and a rule has to be written in the matching form — a rule written the wrong way round
-simply never matches, which the suffix makes visible instead of silent.
+`(path)`. A `(path)` rule has to be written as the executable path; there is no other form for it.
+
+`(id)` needs one more thing known about it: `sourceAppIdentifier` is **`<team-identifier>.<bundle-identifier>`**,
+and the team half is routinely empty, so a leading `.` in the log is normal. macOS reports *the
+same app* under two of these strings — with the team prefix for the sockets the app opens itself,
+without it for the sockets its webview opens on its behalf:
+
+```text
+73T9H7VE4P.com.digiexam.macos.NetworkExtensions    "Test TCP connect"
+.com.digiexam.macos.NetworkExtensions              "Test webview fetch"
+```
+
+So an `app` rule accepts either the plain bundle identifier — `com.digiexam.macos.NetworkExtensions`,
+which covers both reports and is what the seed uses — or the verbatim reported string, which pins
+the team identifier and matches only that one report. Prefer the bundle identifier: pinning a team
+identifier in a rule buys little when nothing here verifies signatures anyway (below), and it
+silently covers only half an app's traffic.
 
 **This is not a code-signature check**, and that is a deliberate, documented deferral. The name is
 what the OS associates with the process; nothing here verifies that the process's signature is

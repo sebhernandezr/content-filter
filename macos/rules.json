@@ -16,7 +16,7 @@
       "action": "allow",
       "app": "com.digiexam.macos.NetworkExtensions",
       "host": ".example.com",
-      "comment": "The one allowed destination for the one allowed app. Check the app= column in 'make logs-flows' for the exact string to use here: it prints an (id) or (path) suffix saying which form the OS reported."
+      "comment": "The one allowed destination for the one allowed app. Written as a plain bundle identifier deliberately: macOS reports sourceAppIdentifier as <team>.<bundle>, and it reports THIS app under two of those - team prefix present for the sockets it opens itself, team half empty (a bare leading dot) for the ones its webview opens for it. Only the bundle identifier covers both. The app= column in 'make logs-flows' prints what was actually reported; a (path)-named flow has no bundle identifier, so name those by their executable path."
     }
   ]
 }

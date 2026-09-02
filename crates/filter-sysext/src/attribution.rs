@@ -2,7 +2,9 @@
 //!
 //! The NetworkExtension framework already answers this, and cheaply. Two sources, tried in order:
 //!
-//! 1. `NEFilterFlow.sourceAppIdentifier` — a plain string identifying the source application.
+//! 1. `NEFilterFlow.sourceAppIdentifier` — `<team-identifier>.<bundle-identifier>`, **not** a
+//!    bare bundle identifier. See "The shape of sourceAppIdentifier" below: reading it as a bare
+//!    bundle identifier is what left every `app` rule silently dead.
 //! 2. `proc_pidpath_audittoken` on the flow's audit token — the executable's path on disk.
 //!
 //! The second exists because the first is documented as possibly nil, and because command-line
@@ -23,6 +25,29 @@
 //!
 //! `proc_pidpath_audittoken` takes the token rather than a pid on purpose: no pid to extract, and
 //! no pid-reuse race to reason about.
+//!
+//! # The shape of `sourceAppIdentifier`
+//!
+//! It is `<team-identifier>.<bundle-identifier>`, and the team half is routinely **empty**, so a
+//! leading `.` is normal rather than a glitch. All four of these forms were observed on one
+//! machine in one afternoon:
+//!
+//! ```text
+//! EQHXZ8M8AV.com.google.Chrome.helper                third-party app, team identifier present
+//! .com.apple.mDNSResponder                           platform binary, no team identifier
+//! 73T9H7VE4P.com.digiexam.macos.NetworkExtensions    this app's own sockets
+//! .com.digiexam.macos.NetworkExtensions              this app's WebKit sockets
+//! ```
+//!
+//! The last two are the ones that matter: **the same application is reported under two different
+//! strings**, depending on whether it opened the socket itself (the `test_connect` command) or its
+//! webview opened one on its behalf (the `fetch` test). A rule compared against the raw string
+//! alone would have to be written twice to cover one app — and the obvious thing to write, the
+//! plain bundle identifier that `macos/rules.json` shipped, matched *neither*, so the app's one
+//! allowed destination was dropped like everything else while the filter looked healthy.
+//!
+//! [`AppId::matches_rule`] is the fix: it compares a rule against [`AppId::bundle_id`] as well as
+//! the verbatim name, so one rule covers both reports of one app.
 //!
 //! # What this deliberately does NOT do
 //!
@@ -65,20 +90,67 @@ const AUDIT_TOKEN_LEN: usize = 32;
 /// The name of the app that opened a flow, and where that name came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppId {
-    /// Either an application identifier (`com.digiexam.macos.NetworkExtensions`) or an executable
-    /// path (`/usr/bin/curl`), depending on [`Self::source`]. This is what an `app` rule in
-    /// `rules.json` is compared against, so the log has to show it verbatim.
+    /// Either an application identifier in the `<team>.<bundle>` shape the module doc describes
+    /// (`73T9H7VE4P.com.digiexam.macos.NetworkExtensions`) or an executable path
+    /// (`/usr/bin/curl`), depending on [`Self::source`]. Held exactly as the OS reported it: the
+    /// log prints it verbatim, and a rule may be written against it verbatim.
     pub name: String,
-    /// `"id"` or `"path"`. Rendered in the log line so which of the two sources answered is never
-    /// a guess — a rule written against the wrong form is otherwise invisible.
+    /// [`Self::FROM_IDENTIFIER`] or [`Self::FROM_PATH`]. Rendered in the log line so which of the
+    /// two sources answered is never a guess — a rule written against the wrong form is otherwise
+    /// invisible. It also decides whether [`Self::bundle_id`] has a team prefix to strip: only the
+    /// identifier form carries one, and splitting a path on `.` would be nonsense.
     pub source: &'static str,
 }
 
 impl AppId {
+    /// [`Self::source`] for a name that came from `sourceAppIdentifier`.
+    pub const FROM_IDENTIFIER: &'static str = "id";
+    /// [`Self::source`] for a name that came from the executable path.
+    pub const FROM_PATH: &'static str = "path";
+
     /// `name(source)`, as it appears in the `app=` column.
     pub fn log_label(&self) -> String {
         format!("{}({})", self.name, self.source)
     }
+
+    /// The bundle identifier inside an identifier-form [`Self::name`], with the `<team>.` prefix
+    /// removed: `com.google.Chrome.helper` for both `EQHXZ8M8AV.com.google.Chrome.helper` and
+    /// `.com.google.Chrome.helper`.
+    ///
+    /// `None` for a path-form name, and `None` when the prefix is not credibly a team identifier.
+    /// That second check is what stops this *widening* an allowlist by accident: without it, an
+    /// identifier carrying no team prefix at all — `com.foo.bar` — would be split into `com` and
+    /// `foo.bar`, and a rule written `foo.bar` would start matching an app it never named.
+    pub fn bundle_id(&self) -> Option<&str> {
+        if self.source != Self::FROM_IDENTIFIER {
+            return None;
+        }
+        let (team, bundle) = self.name.split_once('.')?;
+        if bundle.is_empty() || !(team.is_empty() || is_team_identifier(team)) {
+            return None;
+        }
+        Some(bundle)
+    }
+
+    /// Whether an `app` rule written as `wanted` names this app. Two forms are accepted, and both
+    /// are exact — there is no globbing here:
+    ///
+    /// - the verbatim [`Self::name`], which pins the team identifier too;
+    /// - the bare [`Self::bundle_id`], which is the form that covers an app whose own sockets and
+    ///   whose webview's sockets are reported under different team halves (see the module doc).
+    ///
+    /// The bundle-identifier form is the looser of the two, deliberately: this module does not
+    /// verify code signatures at all, so pinning a team identifier in a rule buys much less than
+    /// it looks like it does. Write the verbatim form anyway when you want it.
+    pub fn matches_rule(&self, wanted: &str) -> bool {
+        self.name == wanted || self.bundle_id() == Some(wanted)
+    }
+}
+
+/// Apple team identifiers are exactly ten alphanumeric characters. Used to decide whether the part
+/// of an identifier before the first `.` really is a team prefix — see [`AppId::bundle_id`].
+fn is_team_identifier(s: &str) -> bool {
+    s.len() == 10 && s.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
 /// Identify the app that opened `flow`, or `None` if neither source could name it.
@@ -89,12 +161,12 @@ pub fn identify(flow: &NEFilterFlow) -> Option<AppId> {
         .filter(|s| !s.is_empty());
 
     if let Some(name) = identifier {
-        return Some(AppId { name, source: "id" });
+        return Some(AppId { name, source: AppId::FROM_IDENTIFIER });
     }
 
     let token = source_audit_token(flow)?;
     let name = path_for_audit_token(&token)?;
-    Some(AppId { name, source: "path" })
+    Some(AppId { name, source: AppId::FROM_PATH })
 }
 
 /// Prefer the app's own audit token; fall back to the process token only when the app token is
@@ -233,10 +305,94 @@ mod tests {
 
     #[test]
     fn log_label_shows_the_source() {
-        let by_id = AppId { name: "com.digiexam.macos.NetworkExtensions".into(), source: "id" };
-        assert_eq!(by_id.log_label(), "com.digiexam.macos.NetworkExtensions(id)");
+        let by_id = AppId {
+            name: "73T9H7VE4P.com.digiexam.macos.NetworkExtensions".into(),
+            source: AppId::FROM_IDENTIFIER,
+        };
+        assert_eq!(by_id.log_label(), "73T9H7VE4P.com.digiexam.macos.NetworkExtensions(id)");
 
-        let by_path = AppId { name: "/usr/bin/curl".into(), source: "path" };
+        let by_path = AppId { name: "/usr/bin/curl".into(), source: AppId::FROM_PATH };
         assert_eq!(by_path.log_label(), "/usr/bin/curl(path)");
+    }
+
+    fn by_id(name: &str) -> AppId {
+        AppId { name: name.into(), source: AppId::FROM_IDENTIFIER }
+    }
+
+    #[test]
+    fn bundle_id_strips_a_team_prefix() {
+        assert_eq!(
+            by_id("EQHXZ8M8AV.com.google.Chrome.helper").bundle_id(),
+            Some("com.google.Chrome.helper")
+        );
+    }
+
+    #[test]
+    fn bundle_id_handles_an_empty_team_half() {
+        // The leading dot is normal, not a glitch: platform binaries and this app's own WebKit
+        // sockets are both reported this way. Missing this is what made the shipped rule dead.
+        assert_eq!(by_id(".com.apple.mDNSResponder").bundle_id(), Some("com.apple.mDNSResponder"));
+        assert_eq!(by_id(".lsfilter").bundle_id(), Some("lsfilter"));
+    }
+
+    #[test]
+    fn bundle_id_refuses_to_split_a_prefix_that_is_not_a_team_identifier() {
+        // Guards against widening the allowlist: an identifier with no team prefix at all must not
+        // be split into "com" + "foo.bar", which would let a rule written "foo.bar" match it.
+        assert_eq!(by_id("com.foo.bar").bundle_id(), None);
+        assert_eq!(by_id("SHORT.com.foo.bar").bundle_id(), None);
+        assert_eq!(by_id("TOOLONGTEAM1.com.foo.bar").bundle_id(), None);
+        assert_eq!(by_id("EQHXZ8M8A-.com.foo.bar").bundle_id(), None, "team ids are alphanumeric");
+    }
+
+    #[test]
+    fn bundle_id_ignores_a_path_named_flow() {
+        // Splitting a path on '.' would be nonsense — and worse, a directory with a dot in it
+        // would produce a "bundle identifier" that a rule could accidentally match.
+        let curl = AppId { name: "/usr/bin/curl".into(), source: AppId::FROM_PATH };
+        assert_eq!(curl.bundle_id(), None);
+        let dotted = AppId { name: "/opt/foo.d/bin/tool".into(), source: AppId::FROM_PATH };
+        assert_eq!(dotted.bundle_id(), None);
+    }
+
+    #[test]
+    fn bundle_id_rejects_a_name_with_nothing_after_the_dot() {
+        assert_eq!(by_id("EQHXZ8M8AV.").bundle_id(), None);
+        assert_eq!(by_id(".").bundle_id(), None);
+        assert_eq!(by_id("nodothere").bundle_id(), None);
+    }
+
+    #[test]
+    fn one_bundle_identifier_rule_matches_both_forms_of_one_app() {
+        // The whole point: macOS reports this app's own sockets and its webview's sockets under
+        // two different strings, and one rule has to cover both.
+        let own = by_id("73T9H7VE4P.com.digiexam.macos.NetworkExtensions");
+        let webview = by_id(".com.digiexam.macos.NetworkExtensions");
+        assert!(own.matches_rule("com.digiexam.macos.NetworkExtensions"));
+        assert!(webview.matches_rule("com.digiexam.macos.NetworkExtensions"));
+    }
+
+    #[test]
+    fn a_rule_may_pin_the_verbatim_reported_string() {
+        let own = by_id("73T9H7VE4P.com.digiexam.macos.NetworkExtensions");
+        assert!(own.matches_rule("73T9H7VE4P.com.digiexam.macos.NetworkExtensions"));
+        // Pinning one report does not admit the other.
+        assert!(!own.matches_rule(".com.digiexam.macos.NetworkExtensions"));
+    }
+
+    #[test]
+    fn matching_is_exact_at_both_ends() {
+        let app = by_id(".com.digiexam.macos.NetworkExtensions");
+        assert!(!app.matches_rule("com.digiexam.macos"), "no prefix matching");
+        assert!(!app.matches_rule("com.digiexam.macos.NetworkExtensions.ContentFilter"));
+        assert!(!app.matches_rule("macos.NetworkExtensions"), "no suffix matching");
+        assert!(!app.matches_rule(""), "an empty rule value must not match everything");
+    }
+
+    #[test]
+    fn a_path_named_flow_matches_only_its_path() {
+        let curl = AppId { name: "/usr/bin/curl".into(), source: AppId::FROM_PATH };
+        assert!(curl.matches_rule("/usr/bin/curl"));
+        assert!(!curl.matches_rule("curl"));
     }
 }

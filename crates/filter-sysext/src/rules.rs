@@ -138,11 +138,20 @@ impl ProtocolMatch {
 pub struct Rule {
     pub action: Action,
 
-    /// The app that must have opened the flow, matched against `AppId::name` — either an
-    /// application identifier (`com.digiexam.macos.NetworkExtensions`) or an executable path
-    /// (`/usr/bin/curl`), whichever [`crate::attribution`] was able to resolve. The `app=` column
-    /// in the flow log prints the exact string to write here, with an `(id)` / `(path)` suffix
-    /// saying which form it is; a rule written in the wrong form simply never matches.
+    /// The app that must have opened the flow, matched by
+    /// [`AppId::matches_rule`](crate::attribution::AppId::matches_rule). Two exact forms are
+    /// accepted:
+    ///
+    /// - a plain **bundle identifier** — `com.digiexam.macos.NetworkExtensions`;
+    /// - the **verbatim** string the log's `app=` column prints, which for the identifier form
+    ///   carries a `<team>.` prefix (`73T9H7VE4P.com.digiexam.macos.NetworkExtensions`, or a bare
+    ///   leading `.` when the team half is empty) and for a command-line tool is an executable
+    ///   path (`/usr/bin/curl`).
+    ///
+    /// Prefer the bundle identifier. macOS reports *the same app* under two different verbatim
+    /// strings depending on whether it opened the socket itself or its webview did, and only the
+    /// bundle identifier covers both — see [`crate::attribution`] for the observed evidence. A
+    /// path-named flow has no bundle identifier, so those rules must be written as the path.
     ///
     /// A flow that could not be named never matches this, so it falls through to
     /// `default_action` — `drop`, in an allowlist.
@@ -182,7 +191,7 @@ impl Rule {
     fn matches(&self, flow: &FlowInfo) -> bool {
         if let Some(wanted) = &self.app {
             match &flow.app {
-                Some(app) if app.name == *wanted => {}
+                Some(app) if app.matches_rule(wanted) => {}
                 _ => return false,
             }
         }
@@ -347,12 +356,22 @@ mod tests {
         }
     }
 
+    /// A flow named by `sourceAppIdentifier`. `app` is written here exactly as the OS reports it,
+    /// team prefix and all — see [`crate::attribution`] for why that is not the same string as the
+    /// bundle identifier a rule is normally written with.
     fn flow_from(app: &str, host: Option<&str>) -> FlowInfo {
         FlowInfo {
-            app: Some(AppId { name: app.into(), source: "id" }),
+            app: Some(AppId { name: app.into(), source: AppId::FROM_IDENTIFIER }),
             ..flow(host, Some(443))
         }
     }
+
+    /// The app rule as `macos/rules.json` ships it: a plain bundle identifier.
+    const APP_RULE: &str = "com.digiexam.macos.NetworkExtensions";
+    /// How macOS reports this app's *own* sockets (`test_connect`): team prefix present.
+    const REPORTED_OWN: &str = "73T9H7VE4P.com.digiexam.macos.NetworkExtensions";
+    /// How macOS reports this app's *webview* sockets (the `fetch` test): team half empty.
+    const REPORTED_WEBVIEW: &str = ".com.digiexam.macos.NetworkExtensions";
 
     fn set(default_action: Action, rules: Vec<Rule>) -> RuleSet {
         RuleSet { default_action, rules }
@@ -509,10 +528,30 @@ mod tests {
         // A flow attribution could not name falls through to the default — which, in an
         // allowlist, means it is refused rather than quietly admitted.
         assert_eq!(s.decide(&flow(None, None)), Action::Drop);
-        assert_eq!(
-            s.decide(&flow_from("com.digiexam.macos.NetworkExtensions", None)),
-            Action::Allow
-        );
+        assert_eq!(s.decide(&flow_from(REPORTED_OWN, None)), Action::Allow);
+    }
+
+    /// The regression test for the bug this matcher was rewritten to fix.
+    ///
+    /// `sourceAppIdentifier` is `<team>.<bundle>`, and macOS reports *one* app under *two* of
+    /// those strings — team prefix present for the sockets it opens itself, team half empty for
+    /// the ones its webview opens for it. The shipped rule is a plain bundle identifier, so
+    /// comparing it against the raw string matched neither: the app's single allowed destination
+    /// was dropped along with everything else, and the only symptom was a test button failing.
+    #[test]
+    fn the_shipped_app_rule_matches_both_forms_macos_reports_for_one_app() {
+        let s = set(Action::Drop, vec![Rule { app: Some(APP_RULE.into()), ..rule(Action::Allow) }]);
+        assert_eq!(s.decide(&flow_from(REPORTED_OWN, None)), Action::Allow, "own sockets");
+        assert_eq!(s.decide(&flow_from(REPORTED_WEBVIEW, None)), Action::Allow, "webview sockets");
+    }
+
+    #[test]
+    fn an_app_rule_may_also_pin_the_verbatim_reported_string() {
+        // The tighter form stays available: it matches that exact report and nothing else, so a
+        // rule pinned to the team-prefixed string does not also admit the webview's flows.
+        let s = set(Action::Drop, vec![Rule { app: Some(REPORTED_OWN.into()), ..rule(Action::Allow) }]);
+        assert_eq!(s.decide(&flow_from(REPORTED_OWN, None)), Action::Allow);
+        assert_eq!(s.decide(&flow_from(REPORTED_WEBVIEW, None)), Action::Drop);
     }
 
     #[test]
@@ -521,7 +560,11 @@ mod tests {
             Action::Drop,
             vec![Rule { app: Some("com.digiexam.macos.NetworkExtensions".into()), ..rule(Action::Allow) }],
         );
-        assert_eq!(s.decide(&flow_from("com.apple.Safari", None)), Action::Drop);
+        assert_eq!(s.decide(&flow_from(".com.apple.Safari", None)), Action::Drop);
+        // A different team shipping the same bundle identifier is out of scope here: this module
+        // does not check signatures, so the bundle identifier is the whole key. What must not
+        // happen is a *different* bundle identifier matching.
+        assert_eq!(s.decide(&flow_from("EQHXZ8M8AV.com.google.Chrome.helper", None)), Action::Drop);
     }
 
     #[test]
@@ -533,7 +576,7 @@ mod tests {
             vec![Rule { app: Some("com.digiexam.macos.NetworkExtensions".into()), ..rule(Action::Allow) }],
         );
         assert_eq!(
-            s.decide(&flow_from("com.digiexam.macos.NetworkExtensions.ContentFilter", None)),
+            s.decide(&flow_from(".com.digiexam.macos.NetworkExtensions.ContentFilter", None)),
             Action::Drop
         );
     }
@@ -543,7 +586,7 @@ mod tests {
         // Raw-socket clients are named by executable path, so a rule can be written that way too.
         let s = set(Action::Drop, vec![Rule { app: Some("/usr/bin/curl".into()), ..rule(Action::Allow) }]);
         let curl = FlowInfo {
-            app: Some(AppId { name: "/usr/bin/curl".into(), source: "path" }),
+            app: Some(AppId { name: "/usr/bin/curl".into(), source: AppId::FROM_PATH }),
             ..flow(None, None)
         };
         assert_eq!(s.decide(&curl), Action::Allow);
@@ -561,16 +604,16 @@ mod tests {
             }],
         );
         assert_eq!(
-            s.decide(&flow_from("com.digiexam.macos.NetworkExtensions", Some("exam.digiexam.com"))),
+            s.decide(&flow_from(REPORTED_WEBVIEW, Some("exam.digiexam.com"))),
             Action::Allow
         );
         assert_eq!(
-            s.decide(&flow_from("com.apple.Safari", Some("exam.digiexam.com"))),
+            s.decide(&flow_from(".com.apple.Safari", Some("exam.digiexam.com"))),
             Action::Drop,
             "same destination, different app"
         );
         assert_eq!(
-            s.decide(&flow_from("com.digiexam.macos.NetworkExtensions", Some("google.com"))),
+            s.decide(&flow_from(REPORTED_WEBVIEW, Some("google.com"))),
             Action::Drop,
             "same app, different destination"
         );

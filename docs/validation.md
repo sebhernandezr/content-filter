@@ -79,7 +79,14 @@ make logs-flows
 
 Every line ends in `app=…(source) pid=…`. The `(id)` suffix means the name came from
 `sourceAppIdentifier`; `(path)` means it came from the executable path behind the flow's audit
-token. **Write rules in whichever form the log shows** — a rule in the other form never matches.
+token. A `(path)` flow can only be named in a rule by its path.
+
+An `(id)` name is `<team-identifier>.<bundle-identifier>`, and the team half is often empty — a
+leading `.` is normal. **The same app appears under two of these**: with the team prefix for the
+sockets it opens itself, without it for the ones its webview opens for it. So **write `(id)` rules
+as the plain bundle identifier** (`com.digiexam.macos.NetworkExtensions`), which covers both; the
+verbatim string also works but pins one of the two.
+
 `app=<none>` means neither source could name the process. `pid=` is populated whenever the flow
 carried an audit token at all, and can be checked against `ps -p <pid>` independently of whether
 our naming worked.
@@ -89,8 +96,8 @@ our naming worked.
 | # | Check | How | Pass |
 |---|---|---|---|
 | 10 | Rules loaded | after enabling | `rules: loaded 3 rule(s), default=drop from /Users/Shared/Digiexam/rules.json` |
-| 11 | Webview fetch | in the app, "Test webview fetch" against the allowed host | panel shows `reachable`; log shows `allow … host=<allowed> app=com.digiexam.macos.NetworkExtensions(id)` or the path form |
-| 12 | TCP connect | in the app, "Test TCP connect" against the same host | panel shows `reachable`; log shows `allow` with the destination's IP under `ip=`-style matching (no `host=`, since a raw connect carries no name) |
+| 11 | Webview fetch | in the app, "Test webview fetch" against the allowed host | panel shows `reachable`; log shows `allow … host=<allowed> app=.com.digiexam.macos.NetworkExtensions(id)` — note the leading dot, this is the webview's report |
+| 12 | TCP connect | in the app, "Test TCP connect" against the same host | panel shows `reachable`; log shows `allow` with `app=<team>.com.digiexam.macos.NetworkExtensions(id)` — the *same* app as item 11, reported with its team prefix |
 
 If 12 shows `drop` while 11 shows `allow`, the seed's `host` rule matched but the destination has
 no IP-literal rule — expected unless you added one; the `ip` matcher exists for exactly this case.
@@ -188,7 +195,7 @@ should imply is already handled.
 |---|---|
 | Filter shows in System Settings, no flows | `make status` — is anything `active`? This is *the* classic failure. |
 | Nothing in `make logs` at all | Is the provider process running? Does the Info.plist class match `#[name=…]`? `assemble-sysext.sh` asserts this. |
-| Digiexam's own allowed request is blocked | Compare the rule's `app` against the log's `app=` column character for character, including which *form* it is — an `(id)` rule will never match a `(path)`-named flow or vice versa. Also confirm the flow has a `host=` at all; if not, match on `ip` instead. |
+| Digiexam's own allowed request is blocked | Compare the rule's `app` against the log's `app=` column. An `(id)` rule never matches a `(path)`-named flow or vice versa. For `(id)`, prefer the plain bundle identifier over the verbatim string: the verbatim form carries a `<team>.` prefix that differs between the app's own sockets and its webview's, so pinning it covers only half the app's traffic. Also confirm the flow has a `host=` at all; if not, match on `ip` instead. |
 | Everything reads `drop`, including DNS | Confirm the port-53 seed rule is still present in the installed `rules.json` — without it nothing resolves and every host rule is unreachable. |
 | Every flow reads `drop`, unexpectedly | Check `/Users/Shared/Digiexam/rules.json` — `default_action` may have been left at `drop` from an earlier family/protocol test that wasn't reverted. |
 | Activation fails immediately | Is the app in `/Applications`? |

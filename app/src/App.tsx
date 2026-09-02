@@ -172,9 +172,6 @@ export function App() {
                 {line}
               </p>
             ))}
-        <p>
-          Watch traffic in a terminal with <code>make logs-flows</code>.
-        </p>
       </section>
 
       <section>
