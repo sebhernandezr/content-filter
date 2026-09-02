@@ -37,6 +37,14 @@ body {
 header h1 { margin: 0 0 4px; font-size: 20px; }
 .subtitle { margin: 0 0 20px; color: var(--muted); }
 
+code {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -84,11 +92,23 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .message.error { border-color: var(--err); color: var(--err); }
 
-.hint { color: var(--muted); margin: 14px 0 0; }
-.hint code {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 1px 5px;
+.hint { color: var(--muted); margin: 8px 0 16px; }
+.panel > .hint:first-of-type { margin-top: -4px; }
+
+.test-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
   font-size: 12px;
 }
+.test-controls input {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+#test-host { width: 220px; }
+#test-port { width: 90px; }

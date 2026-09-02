@@ -1,4 +1,22 @@
 {
-  "default_action": "allow",
-  "rules": []
+  "default_action": "drop",
+  "rules": [
+    {
+      "action": "allow",
+      "port": 53,
+      "comment": "DNS. Without this nothing resolves and no host rule below can ever fire."
+    },
+    {
+      "action": "allow",
+      "protocol": "udp",
+      "port": 67,
+      "comment": "DHCP, so the machine can keep a lease while the filter is enabled."
+    },
+    {
+      "action": "allow",
+      "app": "com.digiexam.macos.NetworkExtensions",
+      "host": ".example.com",
+      "comment": "The one allowed destination for the one allowed app. Check the app= column in 'make logs-flows' for the exact string to use here: it prints an (id) or (path) suffix saying which form the OS reported."
+    }
+  ]
 }

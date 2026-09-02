@@ -2,30 +2,35 @@
 
 Manual, on a real Mac. The MVP is proven when every box is ticked.
 
-The goal is narrow: **flows reach `handleNewFlow:` and are visible in a terminal.** Nothing is
-blocked with the shipped `rules.json` — its `default_action` is `allow` — but the verdict now
-comes from `rules::decide()` (`crates/filter-sysext/src/rules.rs`), not a hard-coded constant, so
-this checklist also proves that seam is wired (see the rules step under Flows below).
+The goal is four provable statements, in this order because each depends on the one before it:
+
+1. Digiexam can reach one explicitly allowed destination.
+2. Safari, Chrome, or anything else **cannot** reach that same destination.
+3. Digiexam **cannot** reach anything outside the allowlist.
+4. IPv4 and IPv6 traffic are both filtered.
+
+The verdict comes from `rules::decide()` (`crates/filter-sysext/src/rules.rs`) against
+`/Library/Application Support/Digiexam/rules.json`, keyed on **both** destination and the app that
+opened the flow (`crates/filter-sysext/src/attribution.rs`). Note what is *not* claimed: the app
+name is what the OS reports, not a signature check, so this checklist proves the allowlist works —
+not that it resists a deliberately spoofed binary. That hardening is a separate, tracked follow-up.
 
 ---
 
-## Step 0 — reboot first (required)
-
-At time of writing this machine has **15 staged copies** of the extension from the previous
-attempt, all `[terminated waiting to uninstall on reboot]`, none `enabled` or `active`:
+## Step 0 — reboot first, if stale copies are staged
 
 ```bash
 make status
 ```
 
-macOS only clears those on boot. **Reboot before anything else**, then confirm:
+macOS only clears `[terminated waiting to uninstall on reboot]` copies on boot. If any are listed,
+**reboot before anything else**, then confirm:
 
 ```bash
 systemextensionsctl list | grep ContentFilter    # expect no output
 ```
 
-Testing before this reboot means testing against whatever stale binary macOS still has
-loaded, which is how the original problem went undiagnosed.
+Testing before this reboot means testing against whatever stale binary macOS still has loaded.
 
 ---
 
@@ -33,14 +38,19 @@ loaded, which is how the original problem went undiagnosed.
 
 | # | Check | Command | Pass |
 |---|---|---|---|
-| 1 | Signing preflight | `make check` | "Signing preflight passed" |
+| 1 | Signing preflight | `make check` | "Signing preflight passed" (now also lints `macos/rules.json`) |
 | 2 | Extension entitlements | `codesign -d --entitlements - --xml dist/*.systemextension \| plutil -p -` | shows `content-filter-provider-systemextension` and the `.ContentFilter` app-id |
 | 3 | Universal slices | build output line `app arch: … sysext arch: …` | both show `x86_64 arm64` |
 | 4 | App signature | `codesign --verify --deep --strict --verbose=2 dist/Digiexam.app` | valid on disk; satisfies its Designated Requirement |
 | 5 | Install location | `make install` | app launches from `/Applications` |
 | 5a | Rules installed | `ls -l "/Library/Application Support/Digiexam/rules.json"` | exists, owned `root:wheel`, mode `644` (installed by `make install-rules`, a dependency of `make install`) |
+| 5b | Rules content | `cat "/Library/Application Support/Digiexam/rules.json"` | `default_action` is `"drop"`; a DNS rule on port 53; an allow rule naming `com.digiexam.macos.NetworkExtensions` (adjust to whatever the log's `app=` column shows for the app — see below) |
 
 Steps 1–4 are all automated inside `make build` and fail the build if violated.
+
+Before testing, edit the seed allow rule's `host` in `macos/rules.json` (and re-run
+`make install-rules`) to point at whatever destination you're demonstrating against — the shipped
+seed uses `.example.com` as a reachable default.
 
 ---
 
@@ -53,55 +63,90 @@ Steps 1–4 are all automated inside `make build` and fail the build if violated
 | 8 | **Activation** | `make status` | exactly **one** entry, with **both** `enabled` and `active` flags set |
 | 9 | Provider process | `make status` | a process for the extension exists, owned by `root` |
 
-**Item 8 is the one that has never passed.** Blank `enabled`/`active` columns mean the
-extension is installed but not running — the state the previous attempt was stuck in.
-
-If the UI says *"staged — restart the Mac to activate"*, `CFBundleVersion` changed relative
-to what is installed. Reboot and re-check; if that happens on an unchanged build, something
-is bumping the version and that is a bug.
+If the UI says *"staged — restart the Mac to activate"*, `CFBundleVersion` changed relative to
+what is installed. Reboot and re-check; if that happens on an unchanged build, something is
+bumping the version and that is a bug.
 
 ---
 
-## Flows
+## The four requirements
 
 Open a log tail in a second terminal and leave it running:
-
-```bash
-make logs
-```
-
-| # | Check | How | Pass |
-|---|---|---|---|
-| 10a | Rules loaded | after enabling | `rules: loaded 0 rule(s), default=allow from /Library/Application Support/Digiexam/rules.json` |
-| 10 | `start_filter` fires | after enabling | `startFilter: provider started` |
-| 11 | Flows arrive | browse in Safari | `allow …` lines appear |
-| 12 | Digiexam's own traffic | any request from the app | the app's own flows appear |
-| 13 | IPv4 | `curl -4 https://example.com` | a line showing `IPv4` |
-| 14 | IPv6 | `curl -6 https://ipv6.google.com` | a line showing `IPv6` |
-| 15 | TCP | browsing | a line showing `TCP` |
-| 16 | UDP | `dig @8.8.8.8 example.com` | a line showing `UDP` |
-| 17 | Ports and hosts | any of the above | host and port shown, e.g. `93.184.216.34:443 host=example.com` |
-| 18 | **Nothing is blocked** | browse normally throughout | no connection failures anywhere on the machine; every logged line starts `allow` |
-
-On item 17: some lines legitimately read `(endpoint not yet known)` instead of a host and port.
-Apple documents `remoteEndpoint` as possibly nil at `handleNewFlow:` time, populated only once
-data flows. That is normal, not a gap.
-
-Only flow lines are worth grepping directly:
 
 ```bash
 make logs-flows
 ```
 
-### Rules smoke test — proves the seam is wired, not just written
+Every line ends in `app=…(source) pid=…`. The `(id)` suffix means the name came from
+`sourceAppIdentifier`; `(path)` means it came from the executable path behind the flow's audit
+token. **Write rules in whichever form the log shows** — a rule in the other form never matches.
+`app=<none>` means neither source could name the process. `pid=` is populated whenever the flow
+carried an audit token at all, and can be checked against `ps -p <pid>` independently of whether
+our naming worked.
 
-No rebuild needed; this is the point.
+### 1 — Digiexam reaches the allowed destination
 
 | # | Check | How | Pass |
 |---|---|---|---|
-| 19a | Deny takes effect | `sudo` edit `/Library/Application Support/Digiexam/rules.json` to `{"default_action":"drop","rules":[]}`, then click **Disable** then **Enable filter** in the app | `make logs` shows the reload line with `default=drop`; `make logs-flows` shows `drop …` lines; browsing actually fails |
-| 19b | Revert | change the file back to `{"default_action":"allow","rules":[]}`, disable/enable again | reload line shows `default=allow`; browsing works again |
-| 19c | Fail-open on a bad file | `sudo mv` the file aside, disable/enable | `make logs` shows a `rules: COULD NOT LOAD` line; traffic still flows (fails open, as documented in `rules.rs`) — then restore the file and disable/enable once more |
+| 10 | Rules loaded | after enabling | `rules: loaded 3 rule(s), default=drop from /Library/Application Support/Digiexam/rules.json` |
+| 11 | Webview fetch | in the app, "Test webview fetch" against the allowed host | panel shows `reachable`; log shows `allow … host=<allowed> app=com.digiexam.macos.NetworkExtensions(id)` or the path form |
+| 12 | TCP connect | in the app, "Test TCP connect" against the same host | panel shows `reachable`; log shows `allow` with the destination's IP under `ip=`-style matching (no `host=`, since a raw connect carries no name) |
+
+If 12 shows `drop` while 11 shows `allow`, the seed's `host` rule matched but the destination has
+no IP-literal rule — expected unless you added one; the `ip` matcher exists for exactly this case.
+
+### 2 — Nobody else reaches it
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 13 | Safari | browse to the allowed host | fails; log shows `drop … host=<allowed>` with Safari's own `app=` (identifier or path form) |
+| 14 | Chrome | same host, in Chrome if installed | fails; log shows `drop` with Chrome's own `app=` |
+| 15 | curl | `curl -v --no-keepalive https://<allowed host>` | fails; log shows `drop` with `app=/usr/bin/curl(path)` or similar |
+
+Item 13 is the one that most directly depends on attribution being correct: Safari and this
+project's own webview both ride WebKit, and if `app=` ever showed the *same* name for both, this
+requirement would be unprovable. `attribution.rs` prefers `sourceAppAuditToken` over
+`sourceProcessAuditToken` precisely to keep them distinct — if this item fails with both showing
+`com.apple.WebKit.Networking`, that preference is the thing to look at.
+
+### 3 — Digiexam reaches nothing else
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 16 | Different host, webview fetch | point the test panel at e.g. `google.com` | panel shows `blocked` or `timed out`; log shows `drop` with Digiexam's own `app=` |
+| 17 | Different host, TCP connect | same, via "Test TCP connect" | same result |
+
+This is the pair that proves the rule is keyed on **both** app and destination: item 11 and item 16
+show the identical app with opposite verdicts, differing only in where it's connecting to.
+
+### 4 — Both address families are filtered
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 18 | IPv4 | `curl -4 https://example.com` | log line shows `IPv4` |
+| 19 | IPv6 | `curl -6 https://ipv6.google.com` | log line shows `IPv6` |
+| 20 | Family-specific rule | add `{ "action": "drop", "family": "v6" }` ahead of the allow rule in `rules.json`, `make install-rules`, disable/enable | v6 traffic to the allowed host now drops; v4 to the same host still allows | 
+
+Revert the family rule afterward.
+
+On any of the above: a line reading `(endpoint not yet known)` instead of a host and port is
+normal, not a gap — Apple documents `remoteEndpoint` as possibly nil at `handleNewFlow:` time,
+populated only once data actually flows.
+
+### Not covered: spoofing
+
+There is deliberately **no** spoofing check in this MVP. `attribution.rs` reports the identity the
+OS associates with the process and does not verify its code signature, so a binary claiming
+Digiexam's identifier would be admitted by an `app` rule. This is a known gap for exam lockdown,
+recorded in that module's doc, and closing it is a separate ticket — not something this checklist
+should imply is already handled.
+
+### Resilience checks (ops fallback, unrelated to the four requirements)
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 22 | Fail-open on a bad file | `sudo mv` the installed `rules.json` aside, disable/enable | `make logs` shows `rules: COULD NOT LOAD`; traffic flows unfiltered (documented fail-open fallback — see `rules.rs`'s module doc); then restore the file and disable/enable again |
+| 23 | Unknown field rejected | `sudo` add a typo'd key (e.g. `"hosts"` instead of `"host"`) to a rule, disable/enable | load fails loudly (`deny_unknown_fields`); the *previous* rule set stays in force rather than a widened one taking effect |
 
 ---
 
@@ -109,28 +154,31 @@ No rebuild needed; this is the point.
 
 | # | Check | How | Pass |
 |---|---|---|---|
-| 20 | Disable | click **Disable** | `stopFilter: reason=…` logged; UI shows "disabled" |
-| 21 | Re-enable | click **Enable filter** | `startFilter` again, **no** second approval prompt |
-| 22 | Remove | click **Remove** | configuration gone from System Settings → Network |
-| 23 | **No version churn** | `make build && make install` without touching `BUNDLE_VERSION`, then re-enable | still exactly one entry, still `active`, **no reboot needed** |
+| 24 | Disable | click **Disable** | `stopFilter: reason=…` logged; UI shows "disabled"; network returns to normal |
+| 25 | Re-enable | click **Enable filter** | `startFilter` again (which reloads rules), **no** second approval prompt |
+| 26 | Remove | click **Remove** | configuration gone from System Settings → Network |
+| 27 | **No version churn** | `make build && make install` without touching `BUNDLE_VERSION`, then re-enable | still exactly one entry, still `active`, **no reboot needed** |
 
-**Item 23 is the regression test for the original defect.** If a plain rebuild forces a
-reboot, `CFBundleVersion` is moving when it should not.
+**Item 27 is the regression test for the original defect.** If a plain rebuild forces a reboot,
+`CFBundleVersion` is moving when it should not.
 
 ---
 
 ## Open questions to settle during validation
 
-- **Intel.** Everything is built universal and item 3 proves both slices exist, but items
-  5–23 will only have been exercised on Apple Silicon. Decide whether Intel validation is
-  required for this ticket or is follow-up scope.
-- **"Digiexam's own traffic"** (item 12) — is that this container app, or a separate
-  existing Digiexam exam client with its own bundle ID? Doesn't change MVP code; determines
-  whether the enforcement allowlist keys on one bundle ID or several.
-- **Source-app attribution** is off (`LOG_SOURCE_APP` in
-  `crates/filter-sysext/src/attribution.rs`). If the flow log turns out to be hard to
-  interpret without knowing which app opened each connection, that is the signal to turn it
-  on — via `SecCode`, not `NSRunningApplication`; see that module's docs.
+- **Intel.** Everything is built universal and item 3 (Build and install) proves both slices
+  exist, but the rest of this checklist will only have been exercised on Apple Silicon. Decide
+  whether Intel validation is required for this ticket or is follow-up scope.
+- **"Digiexam's traffic"** in this checklist means the container app (`Digiexam.app`) itself, via
+  its test panel — not a separate exam client. If a real exam client with its own bundle ID and
+  team exists, its identifier belongs in `rules.json`'s `app` field alongside or instead of the
+  container app's.
+- **DNS is allowed for everyone**, not just Digiexam (see the port-53 seed rule) — a real product
+  would pin the resolver rather than leaving that channel open to every process. Not solved here.
+- **Hostname-carrying flows only.** A `host` rule can only fire once a name reaches
+  `handleNewFlow:` — see "The constraint this model does not solve" in
+  [docs/architecture.md](architecture.md). The `ip` matcher is the mitigation shipped for this
+  MVP; SNI parsing is the deferred, more complete one.
 
 ---
 
@@ -140,7 +188,9 @@ reboot, `CFBundleVersion` is moving when it should not.
 |---|---|
 | Filter shows in System Settings, no flows | `make status` — is anything `active`? This is *the* classic failure. |
 | Nothing in `make logs` at all | Is the provider process running? Does the Info.plist class match `#[name=…]`? `assemble-sysext.sh` asserts this. |
-| Every flow reads `drop`, unexpectedly | Check `/Library/Application Support/Digiexam/rules.json` — `default_action` may have been left at `drop` from an earlier test. |
+| Digiexam's own allowed request is blocked | Compare the rule's `app` against the log's `app=` column character for character, including which *form* it is — an `(id)` rule will never match a `(path)`-named flow or vice versa. Also confirm the flow has a `host=` at all; if not, match on `ip` instead. |
+| Everything reads `drop`, including DNS | Confirm the port-53 seed rule is still present in the installed `rules.json` — without it nothing resolves and every host rule is unreachable. |
+| Every flow reads `drop`, unexpectedly | Check `/Library/Application Support/Digiexam/rules.json` — `default_action` may have been left at `drop` from an earlier family/protocol test that wasn't reverted. |
 | Activation fails immediately | Is the app in `/Applications`? |
 | App launches then dies, or won't launch | AMFI 163: `make check`, and see [signing.md](signing.md). |
 | "staged — restart the Mac" | `CFBundleVersion` changed; see [`macos/identity.sh`](../macos/identity.sh). |

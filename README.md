@@ -3,10 +3,12 @@
 A system-wide network content filter for macOS: an `NEFilterDataProvider` packaged as a
 **system extension**, written in Rust, driven by a Tauri container app.
 
-> **This is the observe-only MVP.** Every network flow on the machine is logged and
-> **allowed**. Nothing is blocked. The allow/drop decision already has a seam —
-> [`crates/filter-sysext/src/rules.rs`](crates/filter-sysext/src/rules.rs) — but the shipped
-> rules file allows everything, so writing real rules is the next ticket.
+> **This is the per-app allowlist MVP.** Every flow is decided by
+> [`crates/filter-sysext/src/rules.rs`](crates/filter-sysext/src/rules.rs) against
+> `rules.json`, keyed on **both** the destination and the app that asked. The shipped seed
+> permits DNS/DHCP plus one app reaching one destination; everything else is dropped by
+> default. See "Rules and Enforcement" in [docs/architecture.md](docs/architecture.md) for the
+> model and its known limits — including that the app name is not signature-verified.
 
 ## Quick start
 
@@ -26,11 +28,14 @@ Then follow [docs/validation.md](docs/validation.md).
 
 ```
 crates/filter-sysext/     the .systemextension executable (own cargo workspace);
-                          flow.rs + rules.rs is where flows are read and decided
-crates/filter-types/      status types shared across the Tauri command boundary
+                          flow.rs + attribution.rs + rules.rs is where flows are read,
+                          attributed to an app, and decided
+crates/filter-types/      status types + the test-connect probe, shared across the Tauri
+                          command boundary
 crates/tauri-plugin-content-filter/
                           activation, NEFilterManager control, Tauri commands
-app/                      Tauri container app + minimal frontend (enable/disable, no flow table)
+app/                      Tauri container app + minimal frontend (enable/disable, allowlist
+                          test panel, no flow table)
 macos/                    entitlements, sysext Info.plist template, identity.sh, rules.json seed
 scripts/                  check-signing / assemble-sysext / build-app
 docs/                     signing.md, validation.md
@@ -53,12 +58,18 @@ reports activation and configuration as two separate rows for this reason, and
 `ActivationState::NeedsReboot` is never collapsed into success.
 
 Flows are watched with `make logs-flows`, a `log stream` predicate over the extension's unified-log
-output — there is no UI table and no IPC channel for flow data. Rules are read from
-`/Library/Application Support/Digiexam/rules.json`, not from the extension's own bundle: the
-extension runs as `root` and the app as the console user, so a path under either one's home
-directory would resolve to two different places for the two of them (the same split that rules
-out a shared App Group container here), and the bundle itself is sealed by the code signature —
-writable rules need to live outside it. See `crates/filter-sysext/src/rules.rs`.
+output — there is no UI table and no IPC channel for flow data. Every logged line names the app
+that opened the flow and its pid, from `sourceAppIdentifier` or the executable path behind the
+flow's audit token (see `crates/filter-sysext/src/attribution.rs`). That name is what an `app`
+rule matches on; it is what the OS reports for the process, not a code-signature check, which
+that module's doc records as a deliberate deferral.
+
+Rules are read from `/Library/Application Support/Digiexam/rules.json`, not from the
+extension's own bundle: the extension runs as `root` and the app as the console user, so a
+path under either one's home directory would resolve to two different places for the two of
+them (the same split that rules out a shared App Group container here), and the bundle itself
+is sealed by the code signature — writable rules need to live outside it. See
+`crates/filter-sysext/src/rules.rs`.
 
 ## Things that will cost you a day if you forget
 

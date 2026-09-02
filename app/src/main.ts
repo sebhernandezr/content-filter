@@ -1,6 +1,7 @@
 /**
- * Minimal UI for the content filter: switch it on and off, and show what state macOS thinks it's
- * in. Flow traffic is watched in a terminal (`make logs-flows`), not here — see rules.rs for why.
+ * Minimal UI for the content filter: switch it on and off, show what state macOS thinks it's
+ * in, and prove the allowlist with two test flows. Flow traffic itself is watched in a
+ * terminal (`make logs-flows`), not here — see rules.rs for why.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -19,6 +20,12 @@ interface FilterStatus {
   enabled: boolean;
 }
 
+/** Mirrors `filter_types::TestConnectResult`. */
+type TestConnectResult =
+  | { state: "reachable" }
+  | { state: "blocked"; detail: string }
+  | { state: "timed_out" };
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const els = {
@@ -28,6 +35,12 @@ const els = {
   activation: $<HTMLElement>("activation"),
   enabled: $<HTMLElement>("enabled"),
   message: $<HTMLParagraphElement>("message"),
+  testHost: $<HTMLInputElement>("test-host"),
+  testPort: $<HTMLInputElement>("test-port"),
+  testFetch: $<HTMLButtonElement>("test-fetch"),
+  testConnect: $<HTMLButtonElement>("test-connect"),
+  fetchResult: $<HTMLElement>("fetch-result"),
+  connectResult: $<HTMLElement>("connect-result"),
 };
 
 function showMessage(text: string, isError = false) {
@@ -115,6 +128,73 @@ els.disable.addEventListener("click", () => run("disable_filter", "Disabling…"
 els.remove.addEventListener("click", () =>
   run("remove_filter", "Removing the configuration and deactivating the extension…"),
 );
+
+/**
+ * Render one test-panel outcome. Three states, not a bool, because "blocked" and "timed out" are
+ * both failures for the demo but mean different things while debugging a rule: a `dropVerdict()`
+ * flow typically times out rather than being actively refused (there is no RST), so a `blocked`
+ * result usually means DNS failed or the host genuinely doesn't exist — not that the filter acted.
+ */
+function renderTestResult(el: HTMLElement, result: TestConnectResult) {
+  el.className = "";
+  switch (result.state) {
+    case "reachable":
+      el.textContent = "reachable";
+      el.className = "state-active";
+      break;
+    case "blocked":
+      el.textContent = `blocked: ${result.detail}`;
+      el.className = "state-error";
+      break;
+    case "timed_out":
+      el.textContent = "timed out (typical shape of a dropped flow)";
+      el.className = "state-error";
+      break;
+  }
+}
+
+els.testFetch.addEventListener("click", async () => {
+  const host = els.testHost.value.trim();
+  const port = els.testPort.value.trim();
+  els.testFetch.disabled = true;
+  els.fetchResult.textContent = "testing…";
+  els.fetchResult.className = "";
+  try {
+    // A plain webview fetch: goes out through WebKit and carries a hostname, so it exercises the
+    // `host` matcher in rules.json rather than the `ip` escape hatch the TCP-connect button below
+    // exercises. AbortSignal.timeout matches the server-side TEST_CONNECT_TIMEOUT in spirit; a
+    // dropped flow here surfaces as this fetch rejecting, which is reported the same as "blocked".
+    await fetch(`https://${host}:${port}/`, { mode: "no-cors", signal: AbortSignal.timeout(5000) });
+    renderTestResult(els.fetchResult, { state: "reachable" });
+  } catch (e) {
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    renderTestResult(
+      els.fetchResult,
+      timedOut ? { state: "timed_out" } : { state: "blocked", detail: String(e) },
+    );
+  } finally {
+    els.testFetch.disabled = false;
+  }
+});
+
+els.testConnect.addEventListener("click", async () => {
+  const host = els.testHost.value.trim();
+  const port = Number(els.testPort.value);
+  els.testConnect.disabled = true;
+  els.connectResult.textContent = "testing…";
+  els.connectResult.className = "";
+  try {
+    const result = await invoke<TestConnectResult>("plugin:content-filter|test_connect", {
+      host,
+      port,
+    });
+    renderTestResult(els.connectResult, result);
+  } catch (e) {
+    renderTestResult(els.connectResult, { state: "blocked", detail: String(e) });
+  } finally {
+    els.testConnect.disabled = false;
+  }
+});
 
 void refresh();
 // No table to keep fresh any more — flows are watched in a terminal — so a slower poll is enough

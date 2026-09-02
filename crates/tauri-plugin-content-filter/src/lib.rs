@@ -49,6 +49,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::disable_filter,
             commands::remove_filter,
             commands::filter_status,
+            commands::test_connect,
         ])
         .setup(|app, _api| {
             app.manage(FilterState::default());

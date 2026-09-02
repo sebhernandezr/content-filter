@@ -48,11 +48,12 @@
 
       com.apple.security.app-sandbox
           Sandboxing a SYSTEM extension is optional, unlike an app extension where it is
-          mandatory. It is off for this observe-only MVP to remove two variables from a ticket
-          whose whole purpose is proving that flows arrive: filesystem access for a durable log
-          fallback, and process inspection for optional source-app attribution. Add it back in
-          the enforcement follow-up once the pipeline is trusted. It is one key, but it needs its
-          own re-validation pass.
+          mandatory. It stays off, and this is now load-bearing rather than a convenience:
+          crates/filter-sysext/src/attribution.rs resolves and verifies every OTHER process on
+          the machine via SecCodeCopyGuestWithAttributes/SecCodeCheckValidity, which is exactly
+          the kind of cross-process inspection App Sandbox exists to prevent. Turning sandboxing
+          on would need an explicit entitlement carving out that access (and a fresh
+          re-validation pass, since it is one key) rather than being a simple flip.
     -->
 </dict>
 </plist>

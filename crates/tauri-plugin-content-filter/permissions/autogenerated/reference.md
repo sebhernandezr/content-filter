@@ -1,7 +1,8 @@
 ## Default Permission
 
 Allows the frontend to activate the content-filter system extension, enable and disable the
-filter, and read its status.
+filter, read its status, and probe a destination with a raw TCP connect for testing the
+allowlist.
 
 #### This default permission set includes the following:
 
@@ -10,6 +11,7 @@ filter, and read its status.
 - `allow-disable-filter`
 - `allow-remove-filter`
 - `allow-filter-status`
+- `allow-test-connect`
 
 ## Permission Table
 
@@ -146,6 +148,32 @@ Enables the remove_filter command without any pre-configured scope.
 <td>
 
 Denies the remove_filter command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`content-filter:allow-test-connect`
+
+</td>
+<td>
+
+Enables the test_connect command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`content-filter:deny-test-connect`
+
+</td>
+<td>
+
+Denies the test_connect command without any pre-configured scope.
 
 </td>
 </tr>

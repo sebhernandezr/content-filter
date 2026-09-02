@@ -66,8 +66,11 @@ pub fn enable() -> Result<(), String> {
                     FILTER_SYSEXT_ID,
                 )));
 
-                // No vendorConfiguration is set: the observe-only build has no policy to pass.
-                // The allowlist lands here in the enforcement follow-up.
+                // No vendorConfiguration is set: the policy travels a different path — a
+                // plain file at a fixed location (crates/filter-sysext/src/rules.rs), not
+                // through NEFilterManager at all. See that module's doc for why a file a
+                // backend can rewrite at runtime was chosen over baking policy into this
+                // saved configuration.
 
                 mgr.setProviderConfiguration(Some(&config));
                 mgr.setLocalizedDescription(Some(&NSString::from_str(FILTER_DESCRIPTION)));

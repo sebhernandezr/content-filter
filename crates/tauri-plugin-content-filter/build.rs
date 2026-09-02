@@ -4,6 +4,7 @@ const COMMANDS: &[&str] = &[
     "disable_filter",
     "remove_filter",
     "filter_status",
+    "test_connect",
 ];
 
 fn main() {

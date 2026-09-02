@@ -6,8 +6,10 @@
 //! declare itself a system-extension provider, and then park on the main dispatch queue so the
 //! framework can call into [`provider::FilterProvider`].
 //!
-//! There is no filtering logic here, and none in the provider either — this is the observe-only
-//! MVP. Every flow is logged and allowed.
+//! There is no filtering logic here — the decision itself lives in [`rules`] and
+//! [`provider::FilterProvider::handle_new_flow`](provider), keyed on both destination and a
+//! verified app identity from [`attribution`]. This file's job stops at getting the provider
+//! running and rules loaded before the framework can call into it.
 //!
 //! # Watching it work
 //!

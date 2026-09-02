@@ -4,7 +4,7 @@ This document explains how the Digiexam macOS Content Filter works end-to-end: h
 
 ## Overview
 
-The content filter is a **system-wide network monitoring tool** built as a macOS **system extension** (not an app extension). It observes every network connection on the machine and logs the details. The shipped rules file allows everything, so nothing is blocked yet — but the allow/drop decision already runs through `rules.rs` (see Layer 1 and "Rules and Enforcement" below), so writing real rules is the next ticket, not a restructuring one.
+The content filter is a macOS **system extension** (not an app extension) that decides, per connection, whether to let traffic through. The decision is a **per-app allowlist**: a rule can require both a destination *and* the identity of the app that opened the connection, so "only Digiexam may reach this host" is expressible as a rule. See "Rules and Enforcement" below for the model, where that identity comes from, and what it is and is not worth.
 
 Two main components:
 1. **The System Extension** (`crates/filter-sysext/`) — a privileged process running as `root` that intercepts network flows
@@ -56,10 +56,10 @@ handleNewFlow: callback is now live
   - `startFilter()` — called when NEFilterManager enables the filter; **reloads rules from disk** (so toggling the filter off and on picks up a rules file a backend has since rewritten, no rebuild or reboot needed), then logs that it started
   - `stopFilter()` — called when the filter is disabled or configuration is removed; logs the reason code
   - `handleNewFlow()` — **the hot path**: called once per new connection (concurrently, from the framework's queue); extracts flow details, asks `rules::decide()` for a verdict, logs the outcome, returns `allowVerdict()` or `dropVerdict()`
-- `crates/filter-sysext/src/flow.rs` — `info_for()`: turns a raw `NEFilterFlow` into a `FlowInfo` struct with fields like remote IP, port, hostname (if available), resolved domain (if WebKit), source app; `FlowInfo::log_line()` renders one human-readable log line
-- `crates/filter-sysext/src/rules.rs` — the allow/deny seam: `RuleSet::decide()` matches a `FlowInfo` against an ordered list of host/port rules and falls back to a default action; see "Rules and Enforcement" below
+- `crates/filter-sysext/src/flow.rs` — `info_for()`: turns a raw `NEFilterFlow` into a `FlowInfo` struct with fields like remote IP, port, hostname (if available), resolved domain (if WebKit), the caller's `AppId`, and its pid; `FlowInfo::log_line()` renders one human-readable log line, including the `app=` and `pid=` columns
+- `crates/filter-sysext/src/rules.rs` — the allowlist: `RuleSet::decide()` matches a `FlowInfo` against an ordered list of rules (app/host/ip/port/protocol/family) and falls back to `default_action`; see "Rules and Enforcement" below
 - `crates/filter-sysext/src/logging.rs` — logs to the unified log system (`os_log`) under subsystem `com.digiexam.macos.NetworkExtensions`
-- `crates/filter-sysext/src/attribution.rs` — source app identification (which bundle ID made the connection); off by default in this MVP
+- `crates/filter-sysext/src/attribution.rs` — names the app that opened a flow, from `sourceAppIdentifier` or the executable path behind the flow's audit token; deliberately *not* a signature check — see "Rules and Enforcement" below
 
 **Runs as:** `root` (required by the NetworkExtension framework)
 
@@ -95,33 +95,117 @@ The container app is a minimal Tauri app (Rust backend + TypeScript frontend) th
   - `disable_filter()` — disable the filter config
   - `remove_filter()` — remove config + deactivate extension
   - `filter_status()` — query current state
+  - `test_connect()` — raw TCP connect to a given host:port, for demonstrating the allowlist from the UI (`filter_types::tcp_probe`)
 - `crates/tauri-plugin-content-filter/src/sysext.rs` — `OSSystemExtensionRequest` API wrapper; submits activation/deactivation requests and waits for callbacks
 - `crates/tauri-plugin-content-filter/src/filter_manager.rs` — `NEFilterManager` API wrapper; enables/disables/removes filter config
-- `crates/filter-types/src/lib.rs` — `ActivationState` / `FilterStatus`, the only types that cross the Tauri command boundary
+- `crates/filter-types/src/lib.rs` — `ActivationState` / `FilterStatus` cross the Tauri command boundary; `TestConnectResult` / `tcp_probe()` implement the test-connect command for real, and are platform-independent so they also back the non-macOS stub build
 
 All blocking APIs are called on a thread pool (not the main thread), because they dispatch to the main queue and wait for callbacks — calling from main would deadlock (the dispatch queue can't service callbacks while the main thread is blocked in the same API).
 
 **Frontend (TypeScript):**
-- `app/src/main.ts` — minimal UI: three buttons (Enable, Disable, Remove) and two status rows (Extension, Configuration). No flow table — see Layer 2.
+- `app/src/main.ts` — minimal UI: three buttons (Enable, Disable, Remove), two status rows
+  (Extension, Configuration), and a test panel with two ways to probe the allowlist — a
+  webview `fetch()` (carries a hostname, exercises the `host` matcher) and a `test_connect`
+  call (a bare socket, carries no hostname, exercises the `ip` matcher). No flow table — see
+  Layer 2.
 - `app/src/style.css` — styling
 - Calls backend commands via Tauri's `invoke()` API
 - Polls status every 2s so the UI stays in sync with macOS state
 
 ## Rules and Enforcement
 
+This is a **per-app allowlist**: `default_action` in the shipped seed is `drop`, and rules say what is
+permitted. Four things have to be provable for the MVP: one named app reaches one named
+destination; nothing else reaches it; that app reaches nothing else; and both IPv4 and IPv6 are
+covered. The first two require the rule key to include *who is asking*, not just *where to* — see
+"Why attribution has to be verified, not just read" below.
+
 Rules live in one file, read at a fixed path: `/Library/Application Support/Digiexam/rules.json`. Not inside the extension's own bundle — the bundle is sealed by the code signature, and rules need to be writable at runtime so a backend can push updates without a rebuild. Not under either process's home directory — the extension runs as `root` and the app as the console user, so `~/…` resolves to two different places for the two of them, the same split that rules out a shared App Group container.
 
 ```json
-{ "default_action": "allow", "rules": [{ "action": "drop", "host": ".example.com", "port": 443 }] }
+{
+  "default_action": "drop",
+  "rules": [
+    { "action": "allow", "port": 53, "comment": "DNS — nothing resolves without it" },
+    { "action": "allow", "protocol": "udp", "port": 67, "comment": "DHCP" },
+    {
+      "action": "allow",
+      "app": "com.digiexam.macos.NetworkExtensions",
+      "host": ".example.com",
+      "comment": "the one allowed destination, only for Digiexam"
+    }
+  ]
+}
 ```
 
-`host` may be an exact match or a leading-dot suffix (`.example.com` covers the apex and every subdomain). Rules are evaluated in order; the first match wins; no match falls through to `default_action`. The seed file ships `{"default_action": "allow", "rules": []}`, so this refactor changes no runtime behaviour.
+Every matcher is optional and they are ANDed; a rule with none matches every flow (that is what the
+DNS/DHCP seed rules are). Rules are evaluated in order; the first match wins; no match falls through
+to `default_action`.
 
-`make install-rules` (a dependency of `make install`) copies `macos/rules.json` to that path with `root:wheel` ownership and mode 644 — sudo is required because `/Library/Application Support` is admin-owned. That ownership stops a non-admin user from editing it and stops nothing else; it is not tamper-proof. Real enforcement will need the provider to verify a backend signature over the rules payload rather than trust the bytes on disk as-is.
+| matcher | matches against | notes |
+|---|---|---|
+| `app` | `AppId.name` | an application identifier or an executable path, whichever the OS reported — see below |
+| `host` | `FlowInfo::best_destination()` | exact, or a leading-dot suffix (`.example.com` covers the apex and every subdomain) |
+| `ip` | `FlowInfo.remote_host` | exact literal only, no CIDR; the escape hatch for a flow that carries an address but no name — see below |
+| `port` | `FlowInfo.remote_port` | |
+| `protocol` | `tcp` / `udp` | |
+| `family` | `v4` / `v6` | |
 
-**This build fails open.** A missing or unparseable rules file logs the failure loudly and keeps whatever rule set was last loaded successfully (or allow-everything, before any load has succeeded). That is correct for an observe-only MVP and wrong for real lockdown — a filter that opens the network when its rules file goes missing is worse than no filter — so flipping the fallback to deny-by-default is a deliberate, tracked decision for the enforcement ticket, not something to "fix" in passing.
+**Why DNS and DHCP have to be allowed explicitly:** `default_action: drop` blocks everything not
+matched, including the resolver. Without the port-53 rule, nothing on the machine resolves a
+hostname at all, and no `host` rule can ever fire — the allowlist would appear to block *everything*,
+not just what it was meant to. A blanket DNS allowance is itself a coarse channel (any process can
+tunnel data through it); a real product would pin the resolver instead. That is a follow-up, not
+solved here.
 
-**The constraint enforcement has to solve:** matching on `host` misses most flows at the point a verdict is required, because `remoteEndpoint` is documented as possibly nil at `handleNewFlow:` time and `remoteHostname` is populated only for Network.framework / NSURLSession flows. Blocking a site *by name* reliably needs `pauseVerdict` / `filterDataVerdict` plus reading the TLS ClientHello SNI in `handleOutboundDataFromFlow:`. `rules.rs` stops at the decision point deliberately, so that work has somewhere to land.
+**Where the app name comes from, and what it is worth.**
+`crates/filter-sysext/src/attribution.rs` tries two sources in order:
+`NEFilterFlow.sourceAppIdentifier` (a plain string the framework supplies), and failing that
+`proc_pidpath_audittoken` on the flow's audit token (the executable's path on disk). The audit
+token used is `sourceAppAuditToken` in preference to `sourceProcessAuditToken`: WebKit apps make
+their connections through `com.apple.WebKit.Networking`, so the process token would give Safari and
+this app's own webview the *same* identity and make "Safari cannot, Digiexam can" unprovable.
+
+Because the two sources produce different *forms* of name, the flow log tags each with `(id)` or
+`(path)`, and a rule has to be written in the matching form — a rule written the wrong way round
+simply never matches, which the suffix makes visible instead of silent.
+
+**This is not a code-signature check**, and that is a deliberate, documented deferral. The name is
+what the OS associates with the process; nothing here verifies that the process's signature is
+intact or that it was signed by a particular team, so a binary claiming Digiexam's identifier would
+be reported as Digiexam. An earlier revision did verify signatures via `SecCodeCheckValidity`; it
+was removed because it failed silently for every process (the code discarded every `OSStatus`) and
+because spoofing resistance is not among the current requirements. Re-adding it is real hardening
+work for a later ticket — see `attribution.rs`'s module doc, which records the terms it should come
+back on.
+
+**The escape hatch for nameless flows: `ip`.** A raw `TcpStream::connect` (exactly what the app's
+own "Test TCP connect" button does) carries no hostname anywhere the framework hands the filter at
+`handleNewFlow:` time — see the socket-level view below. `ip` matches the literal remote address
+instead, so an app can still be admitted to a destination it reaches without a name attached.
+
+`make install-rules` (a dependency of `make install`) copies `macos/rules.json` to the runtime path
+with `root:wheel` ownership and mode 644 — sudo is required because `/Library/Application Support`
+is admin-owned. That ownership stops a non-admin user from editing it and stops nothing else; it is
+not tamper-proof against an admin. Real lockdown will need the provider to verify a backend
+signature over the rules payload rather than trust the bytes on disk as-is.
+
+**The ops fallback still fails open, deliberately kept separate from the policy pivot.** A missing
+or unparseable rules file logs the failure loudly and keeps whatever rule set was last loaded
+successfully (or allow-everything, before any load has succeeded). That is a statement about
+resilience to a bad push, not about the shipped policy: as soon as any file loads, *its*
+`default_action` — `drop` here — governs every flow. Making that ops fallback itself fail closed is
+real hardening, and a distinct decision from this pivot; `rules.rs`'s module doc flags it explicitly
+so it is not mistaken for an oversight.
+
+**The constraint this model does not solve:** matching on `host` misses a flow at the moment a
+verdict is required whenever `remoteEndpoint` is nil or `remoteHostname` is unset — see the
+Chrome example below. The `ip` matcher covers the *known-destination* case; it does not recover a
+name the framework never handed over. Reading a name off the wire (the TLS ClientHello SNI, via
+`pauseVerdict` / `filterDataVerdict` and `handleOutboundDataFromFlow:`) would close more of that
+gap and is a real follow-up, but it was set aside for this MVP once the policy became fail-closed:
+an allowlist already refuses anything it cannot positively identify, which is the property that
+made SNI parsing non-essential for *this* ticket.
 
 ## Build Pipeline
 
@@ -248,25 +332,34 @@ Chrome has its own network stack (not WebKit, not NSURLSession). When you naviga
 1. Chrome's internal DNS resolver resolves `digiexam.com` → an IP (e.g., `198.51.100.42`)
 2. Chrome opens a socket to that IP
 3. Filter's `handleNewFlow()` is called with the socket
-4. The flow record gets:
+4. The flow gets:
    - `remote_host` = `"198.51.100.42"` (the IP)
    - `remote_port` = `443` (HTTPS)
    - `hostname` = `null` (Chrome doesn't use NSURLSession)
    - `url_host` = `null` (not a WebKit flow)
-   - `source_app` = `"com.google.Chrome"` (from Mach-O loader inspection)
-   - `rules::decide()` sees `host: None` in this shape, so any host-based rule is skipped and the verdict comes from `default_action` — `Allow` with the shipped rules file
+   - `app` — **is** populated: attribution reads `sourceAppAuditToken` regardless of which
+     networking stack the app uses, so Chrome still gets named even though no hostname is
+     available. Attribution and hostname visibility are independent axes.
+5. `rules::decide()` sees `best_destination() == None` (no `hostname`, no `url_host`, only the raw
+   `remote_host` IP), so any `host` rule is skipped for this flow regardless of `app`. It falls
+   through to `default_action` — `drop`, with the shipped seed — unless a rule matches on `ip`
+   instead of `host`, which is exactly the case that matcher exists for.
 
-**To capture the hostname for non-Apple-networking apps, you'd need to:**
-- Parse TLS ClientHello SNI (Server Name Indication) from the raw bytes
-- Implement `handleInboundDataFromFlow:` and `handleOutboundDataFromFlow:` callbacks
-- This is content inspection, not just socket metadata
-- Planned as a follow-up ticket if needed
+**A name is recoverable in principle** by parsing the TLS ClientHello SNI out of the flow's raw
+outbound bytes (`pauseVerdict` / `filterDataVerdict` plus `handleOutboundDataFromFlow:`). Not
+implemented here — see "The constraint this model does not solve" above for why an allowlist made
+this less urgent than it would be for a denylist.
 
 ### Safari navigating to digiexam.com
 
-Safari uses WebKit, which is built on Network.framework. The flow record gets:
-- `url_host` = `"digiexam.com"` (directly from the URL)
-- Much more useful for domain-level filtering
+Safari uses WebKit, which is built on Network.framework. The flow gets:
+- `url_host` = `"digiexam.com"` (directly from the URL) — `best_destination()` now returns a real
+  name, so a `host` rule can match
+- `app` resolves the same way as Chrome's, via the audit token — but WebKit-originated traffic
+  (Safari, and this project's own webview) is attributed to `com.apple.WebKit.Networking` via
+  `sourceProcessAuditToken` if `sourceAppAuditToken` were ever absent. Attribution prefers the
+  *app* token specifically to avoid that collapse — see `attribution.rs`'s module doc — which is
+  what keeps "Safari cannot reach it, Digiexam can" provable even though both go through WebKit.
 
 ## Provisioning, Signing & Entitlements
 
@@ -320,7 +413,8 @@ The UI reports `Idle` when no activation has been attempted, and always shows th
 | Extension activation | `crates/tauri-plugin-content-filter/src/sysext.rs` |
 | Filter enable/disable | `crates/tauri-plugin-content-filter/src/filter_manager.rs` |
 | Network capture | `crates/filter-sysext/src/provider.rs` (callback), `flow.rs` (extraction) |
-| Allow/deny decision | `crates/filter-sysext/src/rules.rs` |
+| App attribution | `crates/filter-sysext/src/attribution.rs` (sourceAppIdentifier / proc_pidpath) |
+| Allowlist decision | `crates/filter-sysext/src/rules.rs` |
 | Data logging | `crates/filter-sysext/src/logging.rs`; read it with `make logs-flows` |
 | Tauri command types | `crates/filter-types/src/lib.rs` |
 | UI commands | `crates/tauri-plugin-content-filter/src/commands.rs` |

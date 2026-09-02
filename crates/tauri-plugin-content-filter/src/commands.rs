@@ -6,7 +6,7 @@
 //! them from the main thread would deadlock against the very run loop that has to service the
 //! completion handlers.
 
-use filter_types::{ActivationState, FilterStatus};
+use filter_types::{ActivationState, FilterStatus, TestConnectResult};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::{filter_manager, sysext, FilterState};
@@ -85,6 +85,15 @@ pub(crate) async fn remove_filter<R: Runtime>(app: AppHandle<R>) -> CmdResult<Fi
 #[tauri::command]
 pub(crate) async fn filter_status<R: Runtime>(app: AppHandle<R>) -> CmdResult<FilterStatus> {
     status_now(&app).await
+}
+
+/// Attempt a raw TCP connect to `host:port` from this app's own process, and report whether it
+/// got through. This is [`filter_types::tcp_probe`], not anything macOS-specific — see that
+/// function's doc for why a bare socket connect, rather than a request through the webview,
+/// is the shape of traffic that proves the `ip` matcher in `rules.json` actually works.
+#[tauri::command]
+pub(crate) async fn test_connect(host: String, port: u16) -> CmdResult<TestConnectResult> {
+    blocking(move || filter_types::tcp_probe(&host, port)).await
 }
 
 /// Read the live status: configuration state from NEFilterManager, activation state from what we

@@ -355,10 +355,22 @@
           "markdownDescription": "Denies the remove_filter command without any pre-configured scope."
         },
         {
-          "description": "Allows the frontend to activate the content-filter system extension, enable and disable the\nfilter, and read its status.\n\n#### This default permission set includes:\n\n- `allow-activate-extension`\n- `allow-enable-filter`\n- `allow-disable-filter`\n- `allow-remove-filter`\n- `allow-filter-status`",
+          "description": "Enables the test_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-connect",
+          "markdownDescription": "Enables the test_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-connect",
+          "markdownDescription": "Denies the test_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Allows the frontend to activate the content-filter system extension, enable and disable the\nfilter, read its status, and probe a destination with a raw TCP connect for testing the\nallowlist.\n\n#### This default permission set includes:\n\n- `allow-activate-extension`\n- `allow-enable-filter`\n- `allow-disable-filter`\n- `allow-remove-filter`\n- `allow-filter-status`\n- `allow-test-connect`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Allows the frontend to activate the content-filter system extension, enable and disable the\nfilter, and read its status.\n\n#### This default permission set includes:\n\n- `allow-activate-extension`\n- `allow-enable-filter`\n- `allow-disable-filter`\n- `allow-remove-filter`\n- `allow-filter-status`"
+          "markdownDescription": "Allows the frontend to activate the content-filter system extension, enable and disable the\nfilter, read its status, and probe a destination with a raw TCP connect for testing the\nallowlist.\n\n#### This default permission set includes:\n\n- `allow-activate-extension`\n- `allow-enable-filter`\n- `allow-disable-filter`\n- `allow-remove-filter`\n- `allow-filter-status`\n- `allow-test-connect`"
         }
       ]
     }

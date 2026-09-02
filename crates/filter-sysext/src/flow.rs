@@ -2,7 +2,9 @@
 //!
 //! Everything the ticket asks to observe — remote host and port, transport protocol, IPv4 vs
 //! IPv6 — comes from `NEFilterSocketFlow`, which is the concrete subclass we get when the filter
-//! is configured with `filterSockets = true`.
+//! is configured with `filterSockets = true`. Source-app identity comes from
+//! [`crate::attribution`], which is where the actual work (and the actual trust decision) lives;
+//! this module just carries the result alongside everything else `rules::decide` needs.
 //!
 //! `FlowInfo` used to be `filter_types::FlowRecord`, serialized as `FLOW1 {json}` and shipped to
 //! the container app over the unified log so a UI table could render it. There is no UI table any
@@ -16,7 +18,7 @@ use objc2::rc::Retained;
 use objc2_network_extension::NWHostEndpoint;
 use objc2_network_extension::{NEFilterFlow, NEFilterSocketFlow};
 
-use crate::attribution;
+use crate::attribution::{self, AppId};
 use crate::rules::Action;
 
 /// IP address family, from `socketFamily` (`AF_INET` / `AF_INET6` in `<sys/socket.h>`).
@@ -110,11 +112,14 @@ pub struct FlowInfo {
     /// `NEFilterFlow.URL.host`, populated for WebKit-originated flows.
     pub url_host: Option<String>,
 
-    /// Bundle identifier of the originating app.
-    ///
-    /// Always `None` in this MVP: attribution is behind a compile-time flag
-    /// (`crates/filter-sysext/src/attribution.rs`). See that module for what enabling it costs.
-    pub source_app: Option<String>,
+    /// The app that opened this flow — `None` when neither the framework's identifier nor the
+    /// executable path could name it. See [`crate::attribution`], including what it deliberately
+    /// does not verify.
+    pub app: Option<AppId>,
+
+    /// PID of the originating process, for the log only. Independent of [`Self::app`] on purpose:
+    /// it can be checked against reality with `ps -p <pid>` without trusting our identification.
+    pub pid: Option<i32>,
 }
 
 impl FlowInfo {
@@ -130,30 +135,49 @@ impl FlowInfo {
     /// One human-readable line, fixed column order so a terminal tail scans easily:
     ///
     /// ```text
-    /// allow TCP  IPv4 142.250.185.78:443 host=www.google.com
-    /// allow UDP  IPv6 (endpoint not yet known)
-    /// drop  TCP  IPv4 10.0.0.5:443 host=facebook.com
+    /// allow TCP  IPv4 93.184.216.34:443 host=example.com  app=com.digiexam.macos.NetworkExtensions(id) pid=3312
+    /// drop  TCP  IPv4 93.184.216.34:443 host=example.com  app=/usr/bin/curl(path) pid=4711
+    /// drop  UDP  IPv6 (endpoint not yet known)            app=<none> pid=-
     /// ```
     ///
     /// `(endpoint not yet known)` is deliberate wording: it must not read as the filter missing
-    /// traffic when the framework simply has not populated the endpoint yet.
+    /// traffic when the framework simply has not populated the endpoint yet. The `app=` column is
+    /// what makes "same destination, different verdict per app" legible in the log rather than
+    /// just in the eventual pass/fail of a connection; its `(id)` / `(path)` suffix says which
+    /// source named it, so a rule written against the wrong form is visible rather than silent.
     pub fn log_line(&self, action: Action) -> String {
         let proto = self.protocol.label();
         let family = self.family.label();
-        match (&self.remote_host, self.remote_port) {
+        let endpoint = match (&self.remote_host, self.remote_port) {
             (Some(host), Some(port)) => {
-                let mut line = format!("{:<5} {proto:<4} {family:<4} {host}:{port}", action.label());
+                let mut s = format!("{host}:{port}");
                 if let Some(dest) = self.best_destination() {
                     if dest != host {
-                        line.push_str(&format!(" host={dest}"));
+                        s.push_str(&format!(" host={dest}"));
                     }
                 }
-                line
+                s
             }
-            _ => format!(
-                "{:<5} {proto:<4} {family:<4} (endpoint not yet known)",
-                action.label()
-            ),
+            _ => "(endpoint not yet known)".to_owned(),
+        };
+        let pid = match self.pid {
+            Some(pid) => pid.to_string(),
+            None => "-".to_owned(),
+        };
+        format!(
+            "{:<5} {proto:<4} {family:<4} {endpoint}  app={} pid={pid}",
+            action.label(),
+            self.app_label(),
+        )
+    }
+
+    /// The `app=` column's value. `<none>` when neither attribution source could name the process
+    /// — distinct from a name, and worth reading alongside `pid=`, which is populated whenever the
+    /// flow carried an audit token at all.
+    fn app_label(&self) -> String {
+        match &self.app {
+            Some(app) => app.log_label(),
+            None => "<none>".to_owned(),
         }
     }
 }
@@ -208,7 +232,8 @@ pub fn info_for(flow: &NEFilterFlow) -> FlowInfo {
         remote_port,
         hostname,
         url_host,
-        source_app: attribution::source_bundle_id(flow),
+        app: attribution::identify(flow),
+        pid: attribution::pid_for(flow),
     }
 }
 
@@ -270,7 +295,8 @@ mod tests {
             remote_port: Some(443),
             hostname: Some("example.com".into()),
             url_host: None,
-            source_app: None,
+            app: None,
+            pid: None,
         }
     }
 
@@ -323,5 +349,37 @@ mod tests {
     fn log_line_shows_the_drop_action() {
         let line = sample().log_line(Action::Drop);
         assert!(line.starts_with("drop"), "{line}");
+    }
+
+    #[test]
+    fn log_line_marks_an_unnamed_flow_as_none() {
+        let line = sample().log_line(Action::Drop);
+        assert!(line.contains("app=<none>"), "{line}");
+        assert!(line.contains("pid=-"), "a flow with no token shows no pid: {line}");
+    }
+
+    #[test]
+    fn log_line_shows_the_app_name_and_which_source_named_it() {
+        let by_id = FlowInfo {
+            app: Some(AppId {
+                name: "com.digiexam.macos.NetworkExtensions".into(),
+                source: "id",
+            }),
+            pid: Some(3312),
+            ..sample()
+        }
+        .log_line(Action::Allow);
+        assert!(by_id.contains("app=com.digiexam.macos.NetworkExtensions(id)"), "{by_id}");
+        assert!(by_id.contains("pid=3312"), "{by_id}");
+
+        // The path form is what a raw-socket client like curl produces, and a rule written
+        // against the identifier form would silently never match it — hence the suffix.
+        let by_path = FlowInfo {
+            app: Some(AppId { name: "/usr/bin/curl".into(), source: "path" }),
+            pid: Some(4711),
+            ..sample()
+        }
+        .log_line(Action::Drop);
+        assert!(by_path.contains("app=/usr/bin/curl(path)"), "{by_path}");
     }
 }
